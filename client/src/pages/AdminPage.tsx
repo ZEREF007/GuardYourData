@@ -37,12 +37,12 @@ export default function AdminPage() {
   const [copied, setCopied] = useState(false)
 
   const GA_SNIPPET = `<!-- Google Analytics 4 -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-T1V04S7612"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-  gtag('config', 'G-XXXXXXXXXX');
+  gtag('config', 'G-T1V04S7612');
 </script>`
 
   const copyGA = () => {
@@ -339,12 +339,12 @@ export default function AdminPage() {
                   </div>
                   <pre className="bg-slate-950 border border-slate-700/50 rounded-xl p-4 text-xs text-emerald-300 overflow-x-auto leading-relaxed font-mono whitespace-pre-wrap">
 {`<!-- Google Analytics 4 -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-T1V04S7612"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-  gtag('config', 'G-XXXXXXXXXX');
+  gtag('config', 'G-T1V04S7612');
 </script>`}
                   </pre>
                 </div>

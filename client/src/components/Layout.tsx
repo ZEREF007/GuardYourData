@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import Navbar from './Navbar'
@@ -5,6 +6,17 @@ import CustomCursor from './CustomCursor'
 
 export default function Layout() {
   const location = useLocation()
+
+  // Track SPA route changes in GA4
+  useEffect(() => {
+    if (typeof (window as any).gtag === 'function') {
+      ;(window as any).gtag('event', 'page_view', {
+        page_path: location.pathname + location.search,
+        page_title: document.title,
+      })
+    }
+  }, [location])
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
       <CustomCursor />
