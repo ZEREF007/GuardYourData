@@ -25,11 +25,18 @@ interface Stats {
   scoreBuckets: { below40: number; p40_70: number; p70_90: number; above90: number }
 }
 
+interface UserRow {
+  id: number; name: string; email: string; role: string; created_at: string
+  last_ip: string; pages_visited: number; best_quiz_pct: number | null
+  quiz_attempts: number; best_game_score: number | null
+}
+
 export default function AdminPage() {
   const { user, token } = useAuth()
   const nav = useNavigate()
 
   const [stats, setStats] = useState<Stats | null>(null)
+  const [allUsers, setAllUsers] = useState<UserRow[]>([])
   const [videoUrls, setVideoUrls] = useState<Record<string, string>>({})
   const [savingId, setSavingId] = useState<string | null>(null)
   const [savedId, setSavedId] = useState<string | null>(null)
@@ -56,6 +63,7 @@ export default function AdminPage() {
     const h = { Authorization: `Bearer ${token}` }
 
     fetch('/api/admin/stats', { headers: h }).then(r => r.json()).then(setStats)
+    fetch('/api/admin/users', { headers: h }).then(r => r.json()).then(d => { if (d.users) setAllUsers(d.users) })
     fetch('/api/admin/videos', { headers: h }).then(r => r.json()).then(d => {
       const map: Record<string, string> = {}
       d.videos?.forEach((v: { module_id: string; url: string }) => { map[v.module_id] = v.url })
@@ -256,19 +264,22 @@ export default function AdminPage() {
         {/* ── USERS TAB ── */}
         {tab === 'users' && (
           <div className="card overflow-x-auto">
-            <h2 className="text-white font-bold mb-4">Recent Users</h2>
+            <h2 className="text-white font-bold mb-1">All Users <span className="text-slate-500 font-normal text-sm">({allUsers.length})</span></h2>
+            <p className="text-slate-500 text-xs mb-4">IP address recorded on last login</p>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-slate-500 border-b border-slate-700/50">
                   <th className="text-left py-2 pr-4 font-semibold">Name</th>
                   <th className="text-left py-2 pr-4 font-semibold">Email</th>
                   <th className="text-left py-2 pr-4 font-semibold">Role</th>
+                  <th className="text-left py-2 pr-4 font-semibold">Last IP</th>
                   <th className="text-left py-2 pr-4 font-semibold">Pages</th>
+                  <th className="text-left py-2 pr-4 font-semibold">Best Quiz</th>
                   <th className="text-left py-2 font-semibold">Joined</th>
                 </tr>
               </thead>
               <tbody>
-                {stats?.recentUsers.map(u => (
+                {allUsers.map(u => (
                   <tr key={u.id} className="border-b border-slate-800/40 last:border-0">
                     <td className="py-2.5 pr-4 text-white font-medium">{u.name}</td>
                     <td className="py-2.5 pr-4 text-slate-400">{u.email}</td>
@@ -276,17 +287,25 @@ export default function AdminPage() {
                       <span className={clsx(
                         'px-2 py-0.5 rounded-full text-xs font-semibold',
                         u.role === 'admin' ? 'bg-brand-600/30 text-brand-300' : 'bg-slate-700/50 text-slate-400',
-                      )}>
-                        {u.role}
+                      )}>{u.role}</span>
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <span className={clsx('font-mono text-xs', u.last_ip ? 'text-cyan-400' : 'text-slate-600')}>
+                        {u.last_ip || '—'}
                       </span>
                     </td>
                     <td className="py-2.5 pr-4 text-slate-300">{u.pages_visited}</td>
+                    <td className="py-2.5 pr-4">
+                      {u.best_quiz_pct != null
+                        ? <span className={clsx('font-semibold', u.best_quiz_pct >= 70 ? 'text-emerald-400' : 'text-amber-400')}>{u.best_quiz_pct}%</span>
+                        : <span className="text-slate-600">—</span>}
+                    </td>
                     <td className="py-2.5 text-slate-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!stats && (
+            {allUsers.length === 0 && (
               <div className="flex justify-center py-8">
                 <Loader2 className="w-6 h-6 text-brand-400 animate-spin" />
               </div>

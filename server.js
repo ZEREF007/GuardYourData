@@ -70,7 +70,19 @@ db.exec(`
     url        TEXT    NOT NULL DEFAULT '',
     updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS otp_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT    NOT NULL,
+    code_hash  TEXT    NOT NULL,
+    purpose    TEXT    NOT NULL DEFAULT 'login',  -- 'login' | 'reset'
+    expires_at TEXT    NOT NULL,
+    used       INTEGER NOT NULL DEFAULT 0
+  );
 `);
+
+// Add last_ip column if it doesn't exist yet (safe migration)
+try { db.exec("ALTER TABLE users ADD COLUMN last_ip TEXT DEFAULT ''"); } catch (_) {}
 
 // ─── Startup: ensure admin email is always admin ─────────────
 (function ensureAdminEmail() {
@@ -147,6 +159,10 @@ app.post('/api/auth/login', (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password))
     return res.status(401).json({ error: 'Invalid email or password.' });
 
+  // Record last login IP
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  db.prepare("UPDATE users SET last_ip = ? WHERE id = ?").run(ip, user.id);
+
   const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
   res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
 });
@@ -156,6 +172,91 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   const user = db.prepare('SELECT id, name, email, role, created_at FROM users WHERE id = ?').get(req.user.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({ user });
+});
+
+// ── OTP helpers ──────────────────────────────────────────────
+function generateOtp() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+function cleanExpiredOtps() {
+  db.prepare("DELETE FROM otp_tokens WHERE expires_at < datetime('now') OR used = 1").run();
+}
+
+// POST /api/auth/forgot  — request password-reset OTP
+app.post('/api/auth/forgot', (req, res) => {
+  const { email } = req.body || {};
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  // Always return same shape (prevent user enumeration)
+  if (!user) return res.json({ ok: true, demo_code: null, message: 'If this email exists, a code was sent.' });
+
+  cleanExpiredOtps();
+  const code = generateOtp();
+  const hash = bcrypt.hashSync(code, 8);
+  db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'reset', datetime('now','+10 minutes'))").run(email.toLowerCase().trim(), hash);
+  console.log(`  🔑  [RESET OTP] ${email} → ${code}  (expires in 10 min)`);
+  // In production: send via email. For demo, include in response.
+  res.json({ ok: true, demo_code: code, message: 'Code generated. In production this would be emailed.' });
+});
+
+// POST /api/auth/reset-password  — verify OTP + set new password
+app.post('/api/auth/reset-password', (req, res) => {
+  const { email, code, newPassword } = req.body || {};
+  if (!email || !code || !newPassword) return res.status(400).json({ error: 'All fields are required.' });
+
+  const pwErr = validatePassword(newPassword);
+  if (pwErr) return res.status(400).json({ error: pwErr });
+
+  cleanExpiredOtps();
+  const rows = db.prepare("SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'reset' AND used = 0 AND expires_at > datetime('now') ORDER BY id DESC LIMIT 5").all(email.toLowerCase().trim());
+  const match = rows.find(r => bcrypt.compareSync(code, r.code_hash));
+  if (!match) return res.status(400).json({ error: 'Invalid or expired code. Please request a new one.' });
+
+  db.prepare('UPDATE otp_tokens SET used = 1 WHERE id = ?').run(match.id);
+
+  const hash = bcrypt.hashSync(newPassword, 12);
+  db.prepare('UPDATE users SET password = ? WHERE email = ?').run(hash, email.toLowerCase().trim());
+
+  const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  res.json({ ok: true, token, user });
+});
+
+// POST /api/auth/2fa/init  — verify password, issue OTP (2FA first step)
+app.post('/api/auth/2fa/init', (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
+
+  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  if (!user || !bcrypt.compareSync(password, user.password))
+    return res.status(401).json({ error: 'Invalid email or password.' });
+
+  cleanExpiredOtps();
+  const code = generateOtp();
+  const hash = bcrypt.hashSync(code, 8);
+  db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'login', datetime('now','+10 minutes'))").run(user.email, hash);
+  console.log(`  🔐  [2FA OTP] ${user.email} → ${code}  (expires in 10 min)`);
+  res.json({ ok: true, demo_code: code, message: 'OTP generated. In production this would be emailed.' });
+});
+
+// POST /api/auth/2fa/verify  — verify OTP, issue JWT
+app.post('/api/auth/2fa/verify', (req, res) => {
+  const { email, code } = req.body || {};
+  if (!email || !code) return res.status(400).json({ error: 'Email and code are required.' });
+
+  cleanExpiredOtps();
+  const rows = db.prepare("SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'login' AND used = 0 AND expires_at > datetime('now') ORDER BY id DESC LIMIT 5").all(email.toLowerCase().trim());
+  const match = rows.find(r => bcrypt.compareSync(code, r.code_hash));
+  if (!match) return res.status(400).json({ error: 'Invalid or expired code.' });
+
+  db.prepare('UPDATE otp_tokens SET used = 1 WHERE id = ?').run(match.id);
+
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  db.prepare("UPDATE users SET last_ip = ? WHERE id = ?").run(ip, user.id);
+
+  const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  res.json({ ok: true, token, user });
 });
 
 // ─── Progress Routes ─────────────────────────────────────────
@@ -240,6 +341,7 @@ app.get('/api/admin/users', requireAuth, (req, res) => {
 
   const users = db.prepare(`
     SELECT u.id, u.name, u.email, u.role, u.created_at,
+           COALESCE(u.last_ip, '') as last_ip,
            (SELECT COUNT(*) FROM page_visits WHERE user_id = u.id) as pages_visited,
            (SELECT MAX(pct) FROM quiz_attempts WHERE user_id = u.id) as best_quiz_pct,
            (SELECT COUNT(*) FROM quiz_attempts WHERE user_id = u.id) as quiz_attempts,

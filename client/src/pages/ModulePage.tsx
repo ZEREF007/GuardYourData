@@ -76,7 +76,7 @@ export default function ModulePage() {
           loading="lazy"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/60 to-transparent" />
-        <div className="absolute inset-0 p-8 flex flex-col justify-end">
+        <div className="hero-overlay absolute inset-0 p-8 flex flex-col justify-end">
           <div className="badge badge-blue mb-3 w-fit">
             {mod.icon} Module {mod.number} · {mod.duration}
           </div>

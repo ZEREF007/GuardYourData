@@ -227,6 +227,16 @@ html:not(.dark) .absolute.inset-0 .text-white  { color: #ffffff !important; }
 html:not(.dark) .absolute.inset-0 .text-slate-300 { color: rgba(255,255,255,0.85) !important; }
 html:not(.dark) .absolute.inset-0 .text-slate-400 { color: rgba(255,255,255,0.7)  !important; }
 
+/* Hero image overlay — highest priority override for text over dark gradients */
+html:not(.dark) .hero-overlay,
+html:not(.dark) .hero-overlay * { color: inherit; }
+html:not(.dark) .hero-overlay .text-white  { color: #ffffff !important; }
+html:not(.dark) .hero-overlay .text-slate-100,
+html:not(.dark) .hero-overlay .text-slate-200,
+html:not(.dark) .hero-overlay .text-slate-300 { color: rgba(255,255,255,0.88) !important; }
+html:not(.dark) .hero-overlay .text-slate-400,
+html:not(.dark) .hero-overlay .text-slate-500 { color: rgba(255,255,255,0.70) !important; }
+
 /* btn-primary always shows white text */
 html:not(.dark) .btn-primary,
 html:not(.dark) .btn-primary span { color: #ffffff !important; }
