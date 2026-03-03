@@ -4,6 +4,7 @@ import { ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react'
 import { MODULES } from '../data/modules'
 import SlideViewer from '../components/SlideViewer'
 import ModuleMCQ from '../components/ModuleMCQ'
+import CountUp from '../components/CountUp'
 import clsx from 'clsx'
 import QuickTips from '../components/QuickTips'
 
@@ -85,10 +86,18 @@ export default function ModulePage() {
           {/* Key stats */}
           <div className="flex flex-wrap gap-4 mt-5">
             {mod.heroStats.map((s, i) => (
-              <div key={i} className="text-center">
-                <div className="text-xl font-black text-white leading-none">{s.value}</div>
+              <motion.div
+                key={i}
+                className="text-center"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 + i * 0.12 }}
+              >
+                <div className="text-xl font-black text-white leading-none">
+                  <CountUp value={s.value} duration={1600} />
+                </div>
                 <div className="text-slate-400 text-xs mt-0.5">{s.label}</div>
-              </div>
+              </motion.div>
             ))}
           </div>
         </div>
@@ -105,10 +114,17 @@ export default function ModulePage() {
         <p className="section-sub">After completing this module, you will be able to:</p>
         <div className="grid sm:grid-cols-2 gap-2">
           {mod.objectives.map((obj, i) => (
-            <div key={i} className="flex items-start gap-2.5 p-3 bg-slate-100 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700/30">
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.05 * i, type: 'spring', stiffness: 260, damping: 22 }}
+              whileHover={{ scale: 1.02, transition: { duration: 0.15 } }}
+              className="flex items-start gap-2.5 p-3 bg-slate-100 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700/30 cursor-default"
+            >
               <CheckCircle className="w-4 h-4 text-emerald-500 dark:text-emerald-400 mt-0.5 shrink-0" />
               <span className="text-slate-800 dark:text-slate-200 text-sm font-medium">{obj}</span>
-            </div>
+            </motion.div>
           ))}
         </div>
       </motion.section>
