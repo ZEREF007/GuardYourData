@@ -1,4 +1,6 @@
-# FIN7900 FinTech Security Training Platform
+# FinTech Security Training Platform
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ZEREF007/fin7900-fintech-security-training)
 
 An interactive cybersecurity training web application built for FIN7900 Individual Assignment. Covers data breaches, FinTech regulations, cybersecurity concepts, and best practices for financial technology professionals.
 
