@@ -20,8 +20,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/auth" element={<AuthPage />} />
           <Route element={<Layout />}>
+            <Route path="/auth" element={<AuthPage />} />
             <Route path="/" element={<HomePage />} />
             <Route path="/module/:id" element={<ModulePage />} />
             <Route path="/quiz" element={<QuizPage />} />

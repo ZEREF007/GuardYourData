@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Menu, X, Shield, ChevronRight, Sun, Moon, ChevronDown } from 'lucide-react'
+import { Menu, X, Shield, ChevronRight, Sun, Moon, ChevronDown, Globe } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
+import { useLang } from '../context/LanguageContext'
 import clsx from 'clsx'
 
 const MODULE_ITEMS = [
@@ -30,12 +31,15 @@ const NAV_ITEMS: { path: string; label: string; icon: string; live?: boolean }[]
 export default function Navbar() {
   const [mobileOpen, setMobileOpen]     = useState(false)
   const [modulesOpen, setModulesOpen]   = useState(false)
+  const [langOpen, setLangOpen]         = useState(false)
   const [scrolled, setScrolled]         = useState(false)
   const [progress, setProgress]         = useState(0)
   const { user, logout }                = useAuth()
   const { isDark, toggle }              = useTheme()
+  const { t, lang, setLang, langMeta }  = useLang()
   const location                        = useLocation()
   const dropdownRef                     = useRef<HTMLLIElement>(null)
+  const langRef                         = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const onScroll = () => {
@@ -52,18 +56,40 @@ export default function Navbar() {
   useEffect(() => {
     setMobileOpen(false)
     setModulesOpen(false)
+    setLangOpen(false)
   }, [location.pathname])
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setModulesOpen(false)
       }
+      if (langRef.current && !langRef.current.contains(e.target as Node)) {
+        setLangOpen(false)
+      }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  // Label helpers — use translations, fall back to English
+  const navLabel = (path: string, fallback: string) => {
+    const map: Record<string, string> = {
+      '/': t.nav_overview, '/quiz': t.nav_quiz, '/game': t.nav_game,
+      '/glossary': t.nav_glossary, '/laws': t.nav_laws, '/live': t.nav_live,
+      '/dashboard': t.nav_dashboard, '/references': t.nav_references,
+      '/privacy': t.nav_privacy, '/thankyou': t.nav_thankyou,
+    }
+    return map[path] ?? fallback
+  }
+  const modLabel = (path: string, fallback: string) => {
+    const map: Record<string, string> = {
+      '/module/1': t.mod1, '/module/2': t.mod2, '/module/3': t.mod3,
+      '/module/4': t.mod4, '/module/5': t.mod5,
+    }
+    return map[path] ?? fallback
+  }
 
   const isModuleActive = MODULE_ITEMS.some(m => location.pathname === m.path)
 
@@ -104,7 +130,7 @@ export default function Navbar() {
             <li>
               <Link to="/" className={clsx(baseLinkCls, isActive('/') && location.pathname === '/' ? activeCls : idleCls)}>
                 <span className="text-sm">🏠</span>
-                <span>Overview</span>
+                <span>{t.nav_overview}</span>
               </Link>
             </li>
 
@@ -118,7 +144,7 @@ export default function Navbar() {
                 )}
               >
                 <span className="text-sm">📚</span>
-                <span>Modules</span>
+                <span>{t.nav_modules}</span>
                 <ChevronDown className={clsx('w-3 h-3 transition-transform duration-200', modulesOpen && 'rotate-180')} />
               </button>
 
@@ -144,13 +170,13 @@ export default function Navbar() {
                           )}
                         >
                           <span className="text-base w-6 text-center">{m.icon}</span>
-                          <span className={clsx('flex-1 text-xs leading-snug', location.pathname === m.path ? '' : '')}>{m.label}</span>
+                          <span className={clsx('flex-1 text-xs leading-snug')}>{modLabel(m.path, m.label)}</span>
                           {location.pathname === m.path && <ChevronRight className="w-3 h-3 text-brand-500" />}
                         </Link>
                       ))}
                     </div>
                     <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-2">
-                      <p className="text-[10px] text-slate-400 dark:text-slate-500">Click a module to begin learning</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500">{t.nav_modules_hint}</p>
                     </div>
                   </motion.div>
                 )}
@@ -162,7 +188,7 @@ export default function Navbar() {
               <li key={item.path}>
                 <Link to={item.path} className={clsx(baseLinkCls, isActive(item.path) ? activeCls : idleCls)}>
                   <span className="text-sm">{item.icon}</span>
-                  <span>{item.label}</span>
+                  <span>{navLabel(item.path, item.label)}</span>
                   {item.live && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />}
                 </Link>
               </li>
@@ -178,14 +204,14 @@ export default function Navbar() {
                     to="/admin"
                     className="hidden sm:flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-600/20 dark:hover:bg-amber-600/30 text-amber-700 dark:text-amber-300 text-xs font-semibold rounded-lg border border-amber-200 dark:border-amber-600/30 transition-all"
                   >
-                    ⚙️ Admin
+                    ⚙️ {t.nav_admin}
                   </Link>
                 )}
                 <button
                   onClick={logout}
                   className="hidden sm:flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-lg transition-all"
                 >
-                  Sign out
+                  {t.nav_signout}
                 </button>
                 <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
                   {user.name.charAt(0).toUpperCase()}
@@ -196,9 +222,49 @@ export default function Navbar() {
                 to="/auth"
                 className="flex items-center gap-1 px-3 py-1.5 bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold rounded-lg transition-all"
               >
-                Sign in <ChevronRight className="w-3 h-3" />
+                {t.nav_signin} <ChevronRight className="w-3 h-3" />
               </Link>
             )}
+
+            {/* Language switcher */}
+            <div className="relative" ref={langRef}>
+              <button
+                onClick={() => setLangOpen(o => !o)}
+                title={t.lang_label}
+                className="flex items-center gap-1 p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-700 transition-all text-xs font-semibold"
+              >
+                <Globe className="w-4 h-4" />
+                <span className="hidden sm:inline">{langMeta[lang].flag}</span>
+              </button>
+              <AnimatePresence>
+                {langOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.97 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full right-0 mt-1.5 w-40 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/60 rounded-xl shadow-xl dark:shadow-2xl overflow-hidden z-50"
+                  >
+                    {(Object.entries(langMeta) as [import('../context/LanguageContext').Lang, { label: string; flag: string }][]).map(([code, meta]) => (
+                      <button
+                        key={code}
+                        onClick={() => { setLang(code); setLangOpen(false) }}
+                        className={clsx(
+                          'w-full flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium transition-all',
+                          lang === code
+                            ? 'bg-brand-50 dark:bg-brand-600/15 text-brand-700 dark:text-brand-300'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800',
+                        )}
+                      >
+                        <span className="text-base">{meta.flag}</span>
+                        <span>{meta.label}</span>
+                        {lang === code && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-brand-500" />}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* Theme toggle */}
             <button
@@ -240,7 +306,7 @@ export default function Navbar() {
           >
             {/* Modules section */}
             <div className="p-3 border-b border-slate-100 dark:border-slate-800">
-              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 mb-2">Modules</p>
+              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 mb-2">{t.nav_modules}</p>
               <ul className="space-y-0.5">
                 {MODULE_ITEMS.map(m => (
                   <li key={m.path}>
@@ -254,7 +320,7 @@ export default function Navbar() {
                       )}
                     >
                       <span>{m.icon}</span>
-                      <span className="text-xs">{m.label}</span>
+                      <span className="text-xs">{modLabel(m.path, m.label)}</span>
                     </Link>
                   </li>
                 ))}
@@ -277,7 +343,9 @@ export default function Navbar() {
                       )}
                     >
                       <span>{item.icon}</span>
-                      <span>{item.label}</span>                      {item.live && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse ml-auto" />}                    </Link>
+                      <span>{navLabel(item.path, item.label)}</span>
+                      {item.live && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse ml-auto" />}
+                    </Link>
                   </li>
                 ))}
               </ul>

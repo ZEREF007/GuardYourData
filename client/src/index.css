@@ -115,6 +115,11 @@ html.dark { color-scheme: dark; }
    components — zero page file changes needed.
    ===================================================================== */
 
+/* ── Auth page: always dark background regardless of theme ───── */
+.auth-page-wrap {
+  background: #020617 !important;
+}
+
 /* ── Page / section backgrounds ─────────────────────────────── */
 html:not(.dark) .bg-slate-950   { background-color: #f1f5f9 !important; }
 html:not(.dark) .bg-slate-900   { background-color: #f8fafc !important; }
