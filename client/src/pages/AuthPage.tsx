@@ -168,7 +168,7 @@ export default function AuthPage() {
   )
 
   return (
-    <div className="auth-page-wrap min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4 py-12">
+    <div className="auth-page-wrap dark min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
 
         <div className="text-center mb-8">
@@ -329,7 +329,10 @@ export default function AuthPage() {
                   </p>
                   <p className="text-slate-500 text-xs mt-2">You only need to do this once.</p>
                 </div>
-                <DemoCodeBox code={demoCode} />
+                <div className="mb-4 px-4 py-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <p className="text-emerald-300 text-sm">Verification code sent to <strong>{pendingEmail}</strong></p>
+                </div>
                 <form onSubmit={submitOtp} className="space-y-4">
                   <OtpInput />
                   {error && <div className="px-4 py-3 bg-red-950/60 border border-red-700/40 rounded-xl text-red-300 text-sm">{error}</div>}
@@ -386,7 +389,10 @@ export default function AuthPage() {
                   <h2 className="text-white font-bold text-xl">Set New Password</h2>
                   <p className="text-slate-400 text-sm mt-1">Code sent to <span className="text-brand-400">{pendingEmail}</span></p>
                 </div>
-                <DemoCodeBox code={demoCode} />
+                <div className="mb-4 px-4 py-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <p className="text-emerald-300 text-sm">Reset code sent to <strong>{pendingEmail}</strong></p>
+                </div>
                 <form onSubmit={submitReset} className="space-y-4">
                   <OtpInput />
                   <div>

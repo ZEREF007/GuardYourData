@@ -1,12 +1,14 @@
 import { useParams, Link } from 'react-router-dom'
+import { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { ChevronRight, ChevronLeft, CheckCircle } from 'lucide-react'
+import { ChevronRight, ChevronLeft, CheckCircle, BadgeCheck } from 'lucide-react'
 import { MODULES } from '../data/modules'
 import SlideViewer from '../components/SlideViewer'
 import ModuleMCQ from '../components/ModuleMCQ'
 import CountUp from '../components/CountUp'
 import clsx from 'clsx'
 import QuickTips from '../components/QuickTips'
+import { useAuth } from '../context/AuthContext'
 
 const MODULE_TIPS: Record<number, string[]> = {
   1: [
@@ -45,6 +47,34 @@ export default function ModulePage() {
   const { id } = useParams()
   const num = parseInt(id ?? '1', 10)
   const mod = MODULES.find(m => m.number === num)
+  const { token } = useAuth()
+  const [slidesViewed, setSlidesViewed] = useState(false)
+  const [mcqScore, setMcqScore] = useState<{ score: number; total: number } | null>(null)
+  const [manuallyCompleted, setManuallyCompleted] = useState(false)
+  const completedRef = useRef(false)
+
+  const markComplete = (slideDone: boolean, mcq: { score: number; total: number } | null) => {
+    if (!mod || !token || completedRef.current) return
+    if (!slideDone || !mcq) return
+    completedRef.current = true
+    setManuallyCompleted(true)
+    fetch('/api/progress/module-complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ module_id: mod.id, mcq_score: mcq.score, mcq_total: mcq.total }),
+    }).catch(() => { /* silent */ })
+  }
+
+  const markCompleteManual = () => {
+    if (!mod || !token) return
+    completedRef.current = true
+    setManuallyCompleted(true)
+    fetch('/api/progress/module-complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ module_id: mod.id, mcq_score: mcqScore?.score ?? null, mcq_total: mcqScore?.total ?? null }),
+    }).catch(() => { /* silent */ })
+  }
 
   if (!mod) {
     return (
@@ -144,6 +174,10 @@ export default function ModulePage() {
         <SlideViewer
           slides={mod.slides}
           color={mod.color}
+          onAllSlidesViewed={() => {
+            setSlidesViewed(true)
+            markComplete(true, mcqScore)
+          }}
         />
       </motion.section>
 
@@ -157,15 +191,17 @@ export default function ModulePage() {
       >
         <h2 className="section-title">Video Overview</h2>
         <p className="section-sub">Watch a curated video summary of this module</p>
-        <div
-          className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-900/60 flex items-center justify-center"
-          style={{ aspectRatio: '16/9' }}
-          id={`${mod.id}VideoWrap`}
-        >
-          <div className="text-center text-slate-500 dark:text-slate-500">
-            <div className="text-5xl mb-3">🎬</div>
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-400">Module {mod.number} — {mod.title}</p>
-            <p className="text-xs mt-1 text-slate-500 dark:text-slate-500">Video coming soon</p>
+        <div className="max-w-sm">
+          <div
+            className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-900/60 flex items-center justify-center"
+            style={{ aspectRatio: '16/9' }}
+            id={`${mod.id}VideoWrap`}
+          >
+            <div className="text-center text-slate-500 dark:text-slate-500">
+              <div className="text-3xl mb-2">🎬</div>
+              <p className="text-xs font-medium text-slate-700 dark:text-slate-400">Module {mod.number} — {mod.title}</p>
+              <p className="text-[11px] mt-1 text-slate-500 dark:text-slate-500">Video coming soon</p>
+            </div>
           </div>
         </div>
       </motion.section>
@@ -193,7 +229,48 @@ export default function ModulePage() {
       </motion.section>
 
       {/* Mini MCQ Quiz */}
-      <ModuleMCQ questions={mod.mcqs} moduleTitle={mod.title} />
+      <ModuleMCQ
+        questions={mod.mcqs}
+        moduleTitle={mod.title}
+        onComplete={(score, total) => {
+          const result = { score, total }
+          setMcqScore(result)
+          markComplete(slidesViewed, result)
+        }}
+      />
+
+      {/* Manual Mark as Completed */}
+      {token && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="mt-8 mb-2"
+        >
+          {manuallyCompleted ? (
+            <div className="flex items-center gap-3 px-5 py-4 bg-emerald-950/40 border border-emerald-500/30 rounded-2xl">
+              <BadgeCheck className="w-6 h-6 text-emerald-400 shrink-0" />
+              <div>
+                <p className="text-emerald-300 font-semibold text-sm">Module marked as completed!</p>
+                <p className="text-slate-500 text-xs mt-0.5">Your progress has been saved to your dashboard.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-4 px-5 py-4 bg-slate-800/40 border border-slate-700/40 rounded-2xl">
+              <div>
+                <p className="text-white font-semibold text-sm">Finished with this module?</p>
+                <p className="text-slate-400 text-xs mt-0.5">Mark it as completed to track your progress on the dashboard.</p>
+              </div>
+              <button
+                onClick={markCompleteManual}
+                className="shrink-0 flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-xl transition-all"
+              >
+                <BadgeCheck className="w-4 h-4" /> Mark as Completed
+              </button>
+            </div>
+          )}
+        </motion.div>
+      )}
 
       {/* Quick Tips */}
       <QuickTips tips={tips} />

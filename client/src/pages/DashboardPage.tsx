@@ -36,7 +36,56 @@ interface ProgressData {
   gameBest: { best_score: number | null; attempts: number }
   quizHistory: { score: number; total: number; pct: number; passed: number; taken_at: string; filter: string }[]
   gameHistory: { score: number; correct: number; total: number; rank: string; played_at: string }[]
+  moduleCompletions: { module_id: string; mcq_score: number | null; mcq_total: number | null; completed_at: string }[]
   created_at: string | null
+}
+
+// XP + Level system
+const LEVELS = [
+  { min: 0,    label: 'Novice',     emoji: '🌱', color: 'text-slate-400'  },
+  { min: 150,  label: 'Apprentice', emoji: '📘', color: 'text-blue-400'   },
+  { min: 350,  label: 'Analyst',    emoji: '🔍', color: 'text-indigo-400' },
+  { min: 700,  label: 'Expert',     emoji: '🛡️', color: 'text-brand-400'  },
+  { min: 1200, label: 'Master',     emoji: '🏆', color: 'text-yellow-400' },
+]
+
+function calcXP(data: ProgressData | null): number {
+  if (!data) return 0
+  let xp = 0
+  const completedIds = new Set((data.moduleCompletions || []).map(c => c.module_id))
+  const visitedPages = new Set(data.visits.map(v => v.page))
+  const moduleIds = ['mod1','mod2','mod3','mod4','mod5']
+  const modulePaths = ['/module/1','/module/2','/module/3','/module/4','/module/5']
+
+  // Visited a module page: +20 XP each
+  modulePaths.forEach(p => { if (visitedPages.has(p)) xp += 20 })
+
+  // Completed a module (slides + MCQ): +80 XP each (on top of visit)
+  moduleIds.forEach(id => { if (completedIds.has(id)) xp += 80 })
+
+  // All 5 modules completed bonus
+  if (moduleIds.every(id => completedIds.has(id))) xp += 200
+
+  // Each quiz attempt: +10 XP
+  xp += (data.quizBest.attempts || 0) * 10
+
+  // Best quiz score bonus
+  const bp = data.quizBest.best_pct || 0
+  if (bp >= 90) xp += 150
+  else if (bp >= 70) xp += 75
+  else if (bp >= 50) xp += 30
+
+  // Each game attempt: +15 XP
+  xp += (data.gameBest.attempts || 0) * 15
+
+  return xp
+}
+
+function getLevel(xp: number) {
+  for (let i = LEVELS.length - 1; i >= 0; i--) {
+    if (xp >= LEVELS[i].min) return { ...LEVELS[i], xp, next: LEVELS[i + 1] ?? null }
+  }
+  return { ...LEVELS[0], xp, next: LEVELS[1] }
 }
 
 export default function DashboardPage() {
@@ -74,9 +123,16 @@ export default function DashboardPage() {
   }
 
   const visitedPages = new Set(data?.visits.map(v => v.page) || [])
+  const completedIds = new Set((data?.moduleCompletions || []).map(c => c.module_id))
   const modulesVisited = ['/module/1', '/module/2', '/module/3', '/module/4', '/module/5'].filter(p => visitedPages.has(p)).length
+  const modulesCompleted = ['mod1','mod2','mod3','mod4','mod5'].filter(id => completedIds.has(id)).length
   const pagesVisited = visitedPages.size
-  const moduleProgress = (modulesVisited / 5) * 100
+  const moduleProgress = (modulesCompleted / 5) * 100
+
+  const xp = calcXP(data)
+  const level = getLevel(xp)
+  const xpToNext = level.next ? level.next.min - xp : 0
+  const levelPct = level.next ? Math.round(((xp - level.min) / (level.next.min - level.min)) * 100) : 100
 
   const quizHistory = data?.quizHistory || []
   const chartData = quizHistory.slice(0, 8).reverse().map((q, i) => ({
@@ -86,7 +142,7 @@ export default function DashboardPage() {
   }))
 
   const radialData = [
-    { name: 'Modules', value: moduleProgress, fill: '#6366f1' },
+    { name: 'Completed', value: moduleProgress, fill: '#10b981' },
   ]
 
   const bestQuiz = data?.quizBest.best_pct ?? 0
@@ -97,8 +153,8 @@ export default function DashboardPage() {
   const gradeLabel = bestQuiz >= 90 ? 'Distinction' : bestQuiz >= 70 ? 'Credit' : bestQuiz >= 50 ? 'Pass' : bestQuiz > 0 ? 'Attempting' : '—'
   const gradeColor = bestQuiz >= 90 ? 'text-emerald-400' : bestQuiz >= 70 ? 'text-blue-400' : bestQuiz >= 50 ? 'text-amber-400' : 'text-slate-400'
 
-  // Overall progress score: modules 60% + best quiz 40%
-  const overallPct = Math.round((modulesVisited / 5) * 60 + (bestQuiz / 100) * 40)
+  // Overall progress score: module completions 60% + best quiz 40%
+  const overallPct = Math.round((modulesCompleted / 5) * 60 + (bestQuiz / 100) * 40)
   const overallLabel =
     overallPct >= 90 ? '🏆 Distinction' :
     overallPct >= 70 ? '⭐ Credit' :
@@ -106,8 +162,8 @@ export default function DashboardPage() {
     overallPct > 0  ? '📚 In progress' : '🚀 Get started'
 
   const nextStep =
-    modulesVisited < 5
-      ? { label: `Read Module ${modulesVisited + 1}`, to: `/module/${modulesVisited + 1}`, icon: '📖' }
+    modulesCompleted < 5
+      ? { label: `Complete Module ${modulesCompleted + 1}`, to: `/module/${modulesCompleted + 1}`, icon: '📖' }
       : bestQuiz < 70
         ? { label: 'Improve your quiz score', to: '/quiz', icon: '🧠' }
         : { label: 'Browse the Glossary', to: '/glossary', icon: '📚' }
@@ -128,6 +184,24 @@ export default function DashboardPage() {
           </div>
           <h1 className="text-4xl font-extrabold text-white mt-4 mb-1">My Progress 📈</h1>
           <p className="text-slate-300 text-lg">Track how much you have learnt — modules studied, quiz results, and activities completed.</p>
+
+          {/* XP Level bar */}
+          <div className="mt-5 flex items-center gap-4 bg-white/5 border border-white/10 rounded-2xl px-5 py-4 max-w-md">
+            <div className="text-3xl shrink-0">{level.emoji}</div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className={`font-bold text-sm ${level.color}`}>{level.label}</span>
+                <span className="text-slate-400 text-xs">{xp} XP{level.next ? ` → ${level.next.min} XP` : ' (Max)'}</span>
+              </div>
+              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full bg-gradient-to-r from-brand-600 to-brand-400 transition-all`}
+                  style={{ width: `${Math.min(levelPct, 100)}%` }} />
+              </div>
+              {level.next && (
+                <div className="text-slate-500 text-xs mt-1">{xpToNext} XP to {level.next.label}</div>
+              )}
+            </div>
+          </div>
 
           {/* Overall progress + next step */}
           <div className="mt-6 flex flex-wrap gap-4 items-stretch">
@@ -173,7 +247,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { icon: BookOpen, label: 'Pages Visited', value: pagesVisited, sub: `of ${ALL_PAGES.length} pages`, color: 'text-blue-400' },
-            { icon: Target, label: 'Modules Done', value: `${modulesVisited}/5`, sub: `${Math.round(moduleProgress)}% complete`, color: 'text-indigo-400' },
+            { icon: Target, label: 'Modules Done', value: `${modulesCompleted}/5`, sub: `${Math.round(moduleProgress)}% complete`, color: 'text-indigo-400' },
             { icon: Trophy, label: 'Best Quiz Score', value: bestQuiz ? `${bestQuiz}%` : '—', sub: gradeLabel, color: gradeColor },
             { icon: Zap, label: 'Best Game Score', value: bestGame || '—', sub: `${gameAttempts} attempt${gameAttempts !== 1 ? 's' : ''}`, color: 'text-amber-400' },
           ].map((kpi, i) => (
@@ -196,7 +270,8 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Module completion radial */}
           <div className="card">
-            <h2 className="text-white font-bold mb-4">Module Completion</h2>
+            <h2 className="text-white font-bold mb-1">Module Completion</h2>
+            <p className="text-slate-500 text-xs mb-4">{modulesCompleted}/5 completed · {modulesVisited}/5 visited</p>
             <div className="flex items-center gap-6">
               <div className="w-36 h-36">
                 <ResponsiveContainer width="100%" height="100%">
@@ -209,16 +284,19 @@ export default function DashboardPage() {
               </div>
               <div className="flex-1">
                 {[1, 2, 3, 4, 5].map(n => {
-                  const done = visitedPages.has(`/module/${n}`)
+                  const modId = `mod${n}`
+                  const completed = completedIds.has(modId)
+                  const visited = visitedPages.has(`/module/${n}`)
                   return (
                     <div key={n} className="flex items-center gap-3 mb-2">
-                      <div className={clsx('w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0', done ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-500')}>
-                        {done ? '✓' : n}
+                      <div className={clsx('w-5 h-5 rounded-full flex items-center justify-center text-xs shrink-0',
+                        completed ? 'bg-emerald-600 text-white' : visited ? 'bg-brand-600/60 text-white' : 'bg-slate-800 text-slate-500')}>
+                        {completed ? '✓' : visited ? '●' : n}
                       </div>
-                      <span className={clsx('text-xs', done ? 'text-white' : 'text-slate-500')}>
-                        Module {n}
+                      <span className={clsx('text-xs', completed ? 'text-white' : visited ? 'text-slate-300' : 'text-slate-500')}>
+                        Module {n}{completed ? ' — Completed' : visited ? ' — Visited' : ''}
                       </span>
-                      {!done && (
+                      {!visited && (
                         <Link to={`/module/${n}`} className="text-[10px] text-brand-400 hover:text-brand-300 ml-auto">Start →</Link>
                       )}
                     </div>
@@ -226,7 +304,7 @@ export default function DashboardPage() {
                 })}
                 <div className="mt-3 pt-3 border-t border-slate-700/50 text-center">
                   <span className="text-brand-400 font-bold text-xl">{Math.round(moduleProgress)}%</span>
-                  <span className="text-slate-500 text-xs ml-1">complete</span>
+                  <span className="text-slate-500 text-xs ml-1">completed</span>
                 </div>
               </div>
             </div>

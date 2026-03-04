@@ -12,6 +12,35 @@ const Database = require('better-sqlite3');
 const cors     = require('cors');
 const https    = require('https');
 
+// ─── Nodemailer (optional — falls back to console.log if not installed) ──────
+let nodemailer = null;
+try { nodemailer = require('nodemailer'); } catch (_) {}
+
+function buildTransporter() {
+  if (!nodemailer || !process.env.GMAIL_USER || !process.env.GMAIL_PASS) return null;
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
+  });
+}
+
+async function sendEmail(to, subject, html) {
+  const t = buildTransporter();
+  if (!t) {
+    console.log(`  ✉️  [EMAIL — no SMTP configured] To: ${to} | Subject: ${subject}`);
+    return;
+  }
+  try {
+    await t.sendMail({
+      from: `GuardYourData Training <${process.env.GMAIL_USER}>`,
+      to, subject, html,
+    });
+    console.log(`  ✉️  [EMAIL SENT] To: ${to} | Subject: ${subject}`);
+  } catch (err) {
+    console.error(`  ⚠️  Email send failed: ${err.message}`);
+  }
+}
+
 // ─── Config ────────────────────────────────────────────────
 const PORT       = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fin7900-super-secret-key-change-in-prod';
@@ -88,6 +117,16 @@ db.exec(`
     created_at TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(source, target)
   );
+
+  CREATE TABLE IF NOT EXISTS module_completions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    module_id    TEXT    NOT NULL,
+    mcq_score    INTEGER,
+    mcq_total    INTEGER,
+    completed_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, module_id)
+  );
 `);
 
 // Add last_ip column if it doesn't exist yet (safe migration)
@@ -163,7 +202,24 @@ app.post('/api/auth/register', (req, res) => {
   db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', datetime('now','+30 minutes'))")
     .run(cleanEmail, otpHash);
   console.log(`  ✉️  [EMAIL VERIFY OTP] ${cleanEmail} → ${code}  (expires in 30 min)`);
-  res.json({ pending: true, email: cleanEmail, demo_code: code, message: 'Verify your email to complete registration.' });
+
+  // Send real email (falls back to console.log if SMTP not configured)
+  sendEmail(
+    cleanEmail,
+    'Verify your GuardYourData account',
+    `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+      <h2 style="color:#6366f1">GuardYourData Training</h2>
+      <p>Welcome, <strong>${name.trim()}</strong>! Please verify your email to complete registration.</p>
+      <div style="background:#1e293b;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
+        <p style="color:#94a3b8;font-size:13px;margin-bottom:8px">Your verification code</p>
+        <p style="color:#fff;font-size:36px;font-weight:900;letter-spacing:0.4em;margin:0">${code}</p>
+        <p style="color:#64748b;font-size:12px;margin-top:8px">Expires in 30 minutes</p>
+      </div>
+      <p style="color:#94a3b8;font-size:13px">If you did not create an account, you can safely ignore this email.</p>
+    </div>`
+  );
+
+  res.json({ pending: true, email: cleanEmail, message: 'Verify your email to complete registration.' });
 });
 
 // POST /api/auth/login
@@ -185,7 +241,20 @@ app.post('/api/auth/login', (req, res) => {
     db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', datetime('now','+30 minutes'))")
       .run(user.email, otpHash);
     console.log(`  ✉️  [RE-VERIFY OTP] ${user.email} → ${code}`);
-    return res.status(403).json({ error: 'Please verify your email first.', pending: true, demo_code: code, email: user.email });
+    sendEmail(
+      user.email,
+      'Verify your GuardYourData account',
+      `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#6366f1">GuardYourData Training</h2>
+        <p>Your email still needs verification. Use the code below to verify it.</p>
+        <div style="background:#1e293b;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
+          <p style="color:#94a3b8;font-size:13px;margin-bottom:8px">Verification code</p>
+          <p style="color:#fff;font-size:36px;font-weight:900;letter-spacing:0.4em;margin:0">${code}</p>
+          <p style="color:#64748b;font-size:12px;margin-top:8px">Expires in 30 minutes</p>
+        </div>
+      </div>`
+    );
+    return res.status(403).json({ error: 'Please verify your email first.', pending: true, email: user.email });
   }
 
   // Record last login IP
@@ -224,8 +293,21 @@ app.post('/api/auth/forgot', (req, res) => {
   const hash = bcrypt.hashSync(code, 8);
   db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'reset', datetime('now','+10 minutes'))").run(email.toLowerCase().trim(), hash);
   console.log(`  🔑  [RESET OTP] ${email} → ${code}  (expires in 10 min)`);
-  // In production: send via email. For demo, include in response.
-  res.json({ ok: true, demo_code: code, message: 'Code generated. In production this would be emailed.' });
+  sendEmail(
+    email.toLowerCase().trim(),
+    'Reset your GuardYourData password',
+    `<div style="font-family:sans-serif;max-width:480px;margin:auto">
+      <h2 style="color:#6366f1">GuardYourData Training</h2>
+      <p>You requested a password reset. Use the code below — it expires in 10 minutes.</p>
+      <div style="background:#1e293b;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
+        <p style="color:#94a3b8;font-size:13px;margin-bottom:8px">Password reset code</p>
+        <p style="color:#fff;font-size:36px;font-weight:900;letter-spacing:0.4em;margin:0">${code}</p>
+        <p style="color:#64748b;font-size:12px;margin-top:8px">Expires in 10 minutes</p>
+      </div>
+      <p style="color:#94a3b8;font-size:13px">If you did not request a reset, ignore this email — your password is unchanged.</p>
+    </div>`
+  );
+  res.json({ ok: true, message: 'If this email exists, a code was sent.' });
 });
 
 // POST /api/auth/reset-password  — verify OTP + set new password
@@ -318,6 +400,7 @@ app.get('/api/progress', requireAuth, (req, res) => {
   const visits = db.prepare('SELECT page, visited_at FROM page_visits WHERE user_id = ? ORDER BY visited_at').all(uid);
   const quizzes = db.prepare('SELECT * FROM quiz_attempts WHERE user_id = ? ORDER BY taken_at DESC LIMIT 10').all(uid);
   const games   = db.prepare('SELECT * FROM game_attempts WHERE user_id = ? ORDER BY played_at DESC LIMIT 10').all(uid);
+  const completions = db.prepare('SELECT module_id, mcq_score, mcq_total, completed_at FROM module_completions WHERE user_id = ?').all(uid);
 
   const bestQuiz = db.prepare('SELECT MAX(pct) as best_pct, COUNT(*) as attempts FROM quiz_attempts WHERE user_id = ?').get(uid);
   const bestGame = db.prepare('SELECT MAX(score) as best_score, COUNT(*) as attempts FROM game_attempts WHERE user_id = ?').get(uid);
@@ -329,6 +412,7 @@ app.get('/api/progress', requireAuth, (req, res) => {
     gameBest: bestGame,
     quizHistory: quizzes,
     gameHistory: games,
+    moduleCompletions: completions,
     created_at: userRow ? userRow.created_at : null
   });
 });
@@ -355,6 +439,21 @@ app.post('/api/progress/game', requireAuth, (req, res) => {
   const { score, correct, total, max_streak, rank } = req.body || {};
   db.prepare('INSERT INTO game_attempts (user_id, score, correct, total, max_streak, rank) VALUES (?, ?, ?, ?, ?, ?)')
     .run(req.user.id, score, correct, total, max_streak || 0, rank || '');
+  res.json({ ok: true });
+});
+
+// POST /api/progress/module-complete  — mark a module fully completed
+app.post('/api/progress/module-complete', requireAuth, (req, res) => {
+  const { module_id, mcq_score, mcq_total } = req.body || {};
+  if (!module_id) return res.status(400).json({ error: 'module_id required' });
+  db.prepare(`
+    INSERT INTO module_completions (user_id, module_id, mcq_score, mcq_total)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id, module_id) DO UPDATE SET
+      mcq_score = excluded.mcq_score,
+      mcq_total = excluded.mcq_total,
+      completed_at = datetime('now')
+  `).run(req.user.id, module_id, mcq_score ?? null, mcq_total ?? null);
   res.json({ ok: true });
 });
 

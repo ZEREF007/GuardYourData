@@ -13,11 +13,12 @@ interface MCQ {
 interface Props {
   questions: MCQ[]
   moduleTitle: string
+  onComplete?: (score: number, total: number) => void
 }
 
 type Answer = number | null
 
-export default function ModuleMCQ({ questions, moduleTitle }: Props) {
+export default function ModuleMCQ({ questions, moduleTitle, onComplete }: Props) {
   const [started, setStarted] = useState(false)
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Answer[]>(Array(questions.length).fill(null))
@@ -38,7 +39,9 @@ export default function ModuleMCQ({ questions, moduleTitle }: Props) {
   const goNext = () => {
     setShowExplanation(false)
     if (current + 1 >= questions.length) {
+      const finalScore = answers.filter((a, i) => a === questions[i].correct).length
       setFinished(true)
+      if (onComplete) onComplete(finalScore, questions.length)
     } else {
       setCurrent(c => c + 1)
     }

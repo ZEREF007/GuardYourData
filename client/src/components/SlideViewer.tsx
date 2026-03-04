@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Slide } from '../data/modules'
@@ -7,15 +7,23 @@ import clsx from 'clsx'
 interface Props {
   slides: Slide[]
   color?: string
+  onAllSlidesViewed?: () => void
 }
 
-export default function SlideViewer({ slides, color = 'from-brand-600 to-accent-600' }: Props) {
+export default function SlideViewer({ slides, color = 'from-brand-600 to-accent-600', onAllSlidesViewed }: Props) {
   const [current, setCurrent] = useState(0)
   const [direction, setDirection] = useState(1)
+  const visited = useRef<Set<number>>(new Set([0]))
+  const firedRef = useRef(false)
 
   const goTo = (idx: number) => {
     setDirection(idx > current ? 1 : -1)
+    visited.current.add(idx)
     setCurrent(idx)
+    if (!firedRef.current && onAllSlidesViewed && visited.current.size >= slides.length) {
+      firedRef.current = true
+      onAllSlidesViewed()
+    }
   }
   const prev = () => current > 0 && goTo(current - 1)
   const next = () => current < slides.length - 1 && goTo(current + 1)
@@ -36,27 +44,29 @@ export default function SlideViewer({ slides, color = 'from-brand-600 to-accent-
           {String(current + 1).padStart(2, '0')} / {String(slides.length).padStart(2, '0')}
         </div>
 
-        {/* Slide content — full height, no scroll */}
-        <AnimatePresence custom={direction} mode="wait" initial={false}>
-          <motion.div
-            key={current}
-            custom={direction}
-            variants={variants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-            className="px-8 pt-14 pb-6"
-          >
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4 leading-snug">
-              {slides[current].title}
-            </h2>
-            <div
-              className="text-slate-700 dark:text-slate-200 text-[15px] leading-relaxed space-y-2 [&_strong]:text-slate-900 [&_strong]:dark:text-white [&_li]:text-slate-700 [&_li]:dark:text-slate-200"
-              dangerouslySetInnerHTML={{ __html: slides[current].content }}
-            />
-          </motion.div>
-        </AnimatePresence>
+        {/* Slide content — fixed height with internal scroll */}
+        <div className="h-[380px] overflow-y-auto">
+          <AnimatePresence custom={direction} mode="wait" initial={false}>
+            <motion.div
+              key={current}
+              custom={direction}
+              variants={variants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              className="px-8 pt-14 pb-6"
+            >
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4 leading-snug">
+                {slides[current].title}
+              </h2>
+              <div
+                className="text-slate-700 dark:text-slate-200 text-[15px] leading-relaxed space-y-2 [&_strong]:text-slate-900 [&_strong]:dark:text-white [&_li]:text-slate-700 [&_li]:dark:text-slate-200"
+                dangerouslySetInnerHTML={{ __html: slides[current].content }}
+              />
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
         {/* Navigation bar pinned to bottom of card */}
         <div className="flex items-center justify-between gap-4 px-6 py-4 border-t border-slate-200 dark:border-slate-700/40 bg-slate-50 dark:bg-slate-900/40">
