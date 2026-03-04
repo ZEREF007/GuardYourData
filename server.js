@@ -23,32 +23,39 @@ const Database = require('better-sqlite3');
 const cors     = require('cors');
 const https    = require('https');
 
-// ─── Nodemailer (optional — falls back to console.log if not installed) ──────
+// ─── Nodemailer ──────────────────────────────────────────────────────────────
 let nodemailer = null;
-try { nodemailer = require('nodemailer'); } catch (_) {}
+try { nodemailer = require('nodemailer'); } catch (e) {
+  console.error('  ⚠️  nodemailer not found — run: npm install nodemailer');
+}
 
 function buildTransporter() {
-  if (!nodemailer || !process.env.GMAIL_USER || !process.env.GMAIL_PASS) return null;
+  if (!nodemailer) { console.error('  ⚠️  nodemailer not installed'); return null; }
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
+    console.error('  ⚠️  GMAIL_USER or GMAIL_PASS not set in .env');
+    return null;
+  }
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
   });
 }
 
 async function sendEmail(to, subject, html) {
+  console.log(`  ✉️  Attempting email → ${to}`);
   const t = buildTransporter();
-  if (!t) {
-    console.log(`  ✉️  [EMAIL — no SMTP configured] To: ${to} | Subject: ${subject}`);
-    return;
-  }
+  if (!t) return;
   try {
     await t.sendMail({
-      from: `GuardYourData Training <${process.env.GMAIL_USER}>`,
+      from: `"GuardYourData Training" <${process.env.GMAIL_USER}>`,
       to, subject, html,
     });
-    console.log(`  ✉️  [EMAIL SENT] To: ${to} | Subject: ${subject}`);
+    console.log(`  ✅  [EMAIL SENT] → ${to}`);
   } catch (err) {
-    console.error(`  ⚠️  Email send failed: ${err.message}`);
+    console.error(`  ❌  Email send FAILED → ${to}`);
+    console.error(`      Error: ${err.message}`);
   }
 }
 
@@ -739,5 +746,10 @@ app.listen(PORT, () => {
   console.log(`  ─────────────────────────────────`);
   console.log(`  Local:   http://localhost:${PORT}`);
   console.log(`  Auth:    http://localhost:${PORT}/auth.html`);
-  console.log(`  DB:      ${DB_PATH}\n`);
+  console.log(`  DB:      ${DB_PATH}`);
+  if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
+    console.log(`  Email:   ✅  ${process.env.GMAIL_USER} (SMTP ready)\n`);
+  } else {
+    console.log(`  Email:   ❌  No credentials — check .env file\n`);
+  }
 });
