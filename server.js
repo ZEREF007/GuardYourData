@@ -92,6 +92,8 @@ db.exec(`
 
 // Add last_ip column if it doesn't exist yet (safe migration)
 try { db.exec("ALTER TABLE users ADD COLUMN last_ip TEXT DEFAULT ''"); } catch (_) {}
+// Add email_verified column — existing users are pre-verified (DEFAULT 1)
+try { db.exec("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"); } catch (_) {}
 
 // ─── Startup: ensure admin email is always admin ─────────────
 (function ensureAdminEmail() {
@@ -151,11 +153,17 @@ app.post('/api/auth/register', (req, res) => {
   const role = cleanEmail === 'icyace007@gmail.com' ? 'admin' : 'learner';
 
   const hash = bcrypt.hashSync(password, 12);  // 12 rounds for stronger hashing
-  const info = db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)')
+  const info = db.prepare('INSERT INTO users (name, email, password, role, email_verified) VALUES (?, ?, ?, ?, 0)')
                  .run(name.trim(), cleanEmail, hash, role);
 
-  const token = jwt.sign({ id: info.lastInsertRowid, email: cleanEmail, name: name.trim(), role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-  res.json({ token, user: { id: info.lastInsertRowid, name: name.trim(), email: cleanEmail, role } });
+  // Send email verification OTP — user must verify before first login
+  cleanExpiredOtps();
+  const code = generateOtp();
+  const otpHash = bcrypt.hashSync(code, 8);
+  db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', datetime('now','+30 minutes'))")
+    .run(cleanEmail, otpHash);
+  console.log(`  ✉️  [EMAIL VERIFY OTP] ${cleanEmail} → ${code}  (expires in 30 min)`);
+  res.json({ pending: true, email: cleanEmail, demo_code: code, message: 'Verify your email to complete registration.' });
 });
 
 // POST /api/auth/login
@@ -167,6 +175,18 @@ app.post('/api/auth/login', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
   if (!user || !bcrypt.compareSync(password, user.password))
     return res.status(401).json({ error: 'Invalid email or password.' });
+
+  // Block unverified accounts
+  if (user.email_verified === 0) {
+    // Re-send a fresh verification OTP so they can still complete registration
+    cleanExpiredOtps();
+    const code = generateOtp();
+    const otpHash = bcrypt.hashSync(code, 8);
+    db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', datetime('now','+30 minutes'))")
+      .run(user.email, otpHash);
+    console.log(`  ✉️  [RE-VERIFY OTP] ${user.email} → ${code}`);
+    return res.status(403).json({ error: 'Please verify your email first.', pending: true, demo_code: code, email: user.email });
+  }
 
   // Record last login IP
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
@@ -231,7 +251,28 @@ app.post('/api/auth/reset-password', (req, res) => {
   res.json({ ok: true, token, user });
 });
 
-// POST /api/auth/2fa/init  — verify password, issue OTP (2FA first step)
+// POST /api/auth/verify-email  — verify OTP code, mark email as verified, issue JWT
+app.post('/api/auth/verify-email', (req, res) => {
+  const { email, code } = req.body || {};
+  if (!email || !code) return res.status(400).json({ error: 'Email and code are required.' });
+
+  cleanExpiredOtps();
+  const rows = db.prepare("SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'email' AND used = 0 AND expires_at > datetime('now') ORDER BY id DESC LIMIT 5").all(email.toLowerCase().trim());
+  const match = rows.find(r => bcrypt.compareSync(code, r.code_hash));
+  if (!match) return res.status(400).json({ error: 'Invalid or expired code.' });
+
+  db.prepare('UPDATE otp_tokens SET used = 1 WHERE id = ?').run(match.id);
+  db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(email.toLowerCase().trim());
+
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  db.prepare("UPDATE users SET last_ip = ? WHERE id = ?").run(ip, user.id);
+
+  const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  res.json({ ok: true, token, user });
+});
+
+// POST /api/auth/2fa/init  — verify password, issue OTP (2FA first step) [LEGACY — kept for resend]
 app.post('/api/auth/2fa/init', (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });

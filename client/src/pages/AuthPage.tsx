@@ -31,27 +31,30 @@ export default function AuthPage() {
   const [pendingEmail, setPending] = useState('')
   const [loading, setLoading]      = useState(false)
   const [error, setError]          = useState('')
-
-  const { register, completeLogin } = useAuth()
+  const { register, completeLogin, login } = useAuth()
   const nav = useNavigate()
 
   const resetState = (m: Mode) => { setMode(m); setError(''); setOtp(''); setDemoCode(''); setEmailSent(false) }
   const switchTab  = (t: 'login' | 'register') => { setTab(t); resetState(t); setName(''); setEmail(''); setPassword('') }
 
-  /* ─── Step 1: verify credentials, send OTP ─── */
+  /* ─── Login: direct email + password ─ no OTP on every login ─── */
   const submitLogin = async (e: React.FormEvent) => {
     e.preventDefault(); setError(''); setLoading(true)
     try {
-      const r = await fetch(`${API}/auth/2fa/init`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
-      const data = await r.json()
-      if (!r.ok) return setError(data.error || 'Invalid credentials')
-      setDemoCode(data.demo_code || '')
-      setEmailSent(!!data.email_sent)
-      setPending(email); setOtp('')
-      setMode('otp-verify')
+      const res = await login(email, password)
+      if (res.ok) {
+        // completeLogin already called inside login()
+        const u = JSON.parse(localStorage.getItem('user') || '{}')
+        nav(u.role === 'admin' ? '/admin' : '/')
+      } else if (res.pending) {
+        // Unverified email — redirect to OTP verification
+        setDemoCode(res.demo_code || '')
+        setPending(res.email || email)
+        setOtp('')
+        setMode('otp-verify')
+      } else {
+        setError(res.error || 'Invalid credentials')
+      }
     } finally { setLoading(false) }
   }
 
@@ -60,18 +63,25 @@ export default function AuthPage() {
     e.preventDefault(); setError(''); setLoading(true)
     try {
       const res = await register(name, email, password)
-      if (res.ok) {
+      if (!res.ok) return setError(res.error ?? 'Something went wrong')
+      if (res.pending) {
+        // Email verification OTP was sent — show OTP screen
+        setDemoCode(res.demo_code || '')
+        setPending(res.email || email)
+        setOtp('')
+        setMode('otp-verify')
+      } else {
         const u = JSON.parse(localStorage.getItem('user') || '{}')
         nav(u.role === 'admin' ? '/admin' : '/')
-      } else { setError(res.error ?? 'Something went wrong') }
+      }
     } finally { setLoading(false) }
   }
 
-  /* ─── Step 2: verify OTP ─── */
+  /* ─── Verify email OTP (used after registration) ─── */
   const submitOtp = async (e: React.FormEvent) => {
     e.preventDefault(); setError(''); setLoading(true)
     try {
-      const r = await fetch(`${API}/auth/2fa/verify`, {
+      const r = await fetch(`${API}/auth/verify-email`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: pendingEmail, code: otp }),
       })
@@ -82,17 +92,17 @@ export default function AuthPage() {
     } finally { setLoading(false) }
   }
 
-  /* ─── Resend OTP ─── */
+  /* ─── Resend email verification OTP ─── */
   const resendOtp = async () => {
     setError(''); setLoading(true); setOtp('')
     try {
-      const r = await fetch(`${API}/auth/2fa/init`, {
+      const r = await fetch(`${API}/auth/login`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: pendingEmail, password }),
       })
       const data = await r.json()
-      if (r.ok) { setDemoCode(data.demo_code || ''); setEmailSent(!!data.email_sent) }
-      else setError(data.error || 'Could not resend')
+      if (r.status === 403 && data.pending) { setDemoCode(data.demo_code || '') }
+      else if (!r.ok) setError(data.error || 'Could not resend')
     } finally { setLoading(false) }
   }
 
@@ -193,7 +203,7 @@ export default function AuthPage() {
                 {/* Security notice */}
                 <div className="flex items-center gap-2 px-3 py-2 bg-brand-950/40 border border-brand-700/30 rounded-xl mb-5">
                   <ShieldCheck className="w-4 h-4 text-brand-400 shrink-0" />
-                  <span className="text-brand-300 text-xs font-medium">Email verification required on every login</span>
+                  <span className="text-brand-300 text-xs font-medium">Secure login — no code required after email verification</span>
                 </div>
 
                 <form onSubmit={submitLogin} className="space-y-4">
@@ -226,8 +236,8 @@ export default function AuthPage() {
                   <button type="submit" disabled={loading}
                     className="w-full btn-primary justify-center py-3.5 mt-2 disabled:opacity-50 disabled:cursor-not-allowed">
                     {loading
-                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending code...</>
-                      : <><Mail className="w-4 h-4" /> Continue — Send Code</>}
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in...</>
+                      : <><ShieldCheck className="w-4 h-4" /> Sign In</> }
                   </button>
                 </form>
 
@@ -305,27 +315,27 @@ export default function AuthPage() {
               </motion.div>
             )}
 
-            {/* ═══ OTP VERIFY ═══ */}
+            {/* ═══ OTP VERIFY (email verification after registration) ═══ */}
             {mode === 'otp-verify' && (
               <motion.div key="otp-verify" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
                 <div className="text-center mb-6">
                   <div className="w-16 h-16 rounded-2xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center mx-auto mb-4">
                     <Mail className="w-8 h-8 text-brand-400" />
                   </div>
-                  <h2 className="text-white font-bold text-xl">Check Your Email</h2>
+                  <h2 className="text-white font-bold text-xl">Verify Your Email</h2>
                   <p className="text-slate-400 text-sm mt-1.5">
-                    A 6-digit code was sent to<br />
+                    A 6-digit code was sent to confirm your email<br />
                     <span className="text-brand-300 font-semibold">{pendingEmail}</span>
                   </p>
+                  <p className="text-slate-500 text-xs mt-2">You only need to do this once.</p>
                 </div>
-                <EmailSentBox />
                 <DemoCodeBox code={demoCode} />
                 <form onSubmit={submitOtp} className="space-y-4">
                   <OtpInput />
                   {error && <div className="px-4 py-3 bg-red-950/60 border border-red-700/40 rounded-xl text-red-300 text-sm">{error}</div>}
                   <button type="submit" disabled={loading || otp.length !== 6}
                     className="w-full btn-primary justify-center py-3.5 disabled:opacity-50 disabled:cursor-not-allowed">
-                    {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</> : <><ShieldCheck className="w-4 h-4" /> Verify &amp; Sign In</>}
+                    {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</> : <><ShieldCheck className="w-4 h-4" /> Verify Email &amp; Sign In</>}
                   </button>
                 </form>
                 <div className="mt-5 text-center space-y-2">

@@ -120,6 +120,38 @@ html.dark { color-scheme: dark; }
   background: #020617 !important;
 }
 
+/* ── Auth page always dark → restore dark-mode text & bg inside ──── */
+/* The auth page has a hardcoded dark background (#020617), so all
+   the light-mode remaps above must be undone inside it.             */
+html:not(.dark) .auth-page-wrap .text-white   { color: #ffffff !important; }
+html:not(.dark) .auth-page-wrap .text-slate-100 { color: #f1f5f9 !important; }
+html:not(.dark) .auth-page-wrap .text-slate-200 { color: #e2e8f0 !important; }
+html:not(.dark) .auth-page-wrap .text-slate-300 { color: #cbd5e1 !important; }
+html:not(.dark) .auth-page-wrap .text-slate-400 { color: #94a3b8 !important; }
+html:not(.dark) .auth-page-wrap .text-slate-500 { color: #64748b !important; }
+html:not(.dark) .auth-page-wrap .text-slate-600 { color: #475569 !important; }
+html:not(.dark) .auth-page-wrap .bg-slate-900\/60 { background-color: rgba(2,6,23,0.85) !important; }
+html:not(.dark) .auth-page-wrap .bg-slate-800\/60 { background-color: rgba(15,23,42,0.7) !important; }
+html:not(.dark) .auth-page-wrap .bg-slate-800    { background-color: #1e293b !important; }
+html:not(.dark) .auth-page-wrap .bg-slate-700\/50 { background-color: rgba(30,41,59,0.5) !important; }
+html:not(.dark) .auth-page-wrap .border-slate-700\/50 { border-color: rgba(51,65,85,0.5) !important; }
+html:not(.dark) .auth-page-wrap .border-slate-700\/40 { border-color: rgba(51,65,85,0.4) !important; }
+html:not(.dark) .auth-page-wrap input,
+html:not(.dark) .auth-page-wrap textarea {
+  background-color: rgba(15,23,42,0.6) !important;
+  border-color: rgba(71,85,105,0.5) !important;
+  color: #ffffff !important;
+}
+html:not(.dark) .auth-page-wrap input::placeholder,
+html:not(.dark) .auth-page-wrap textarea::placeholder { color: #64748b !important; }
+html:not(.dark) .auth-page-wrap input:focus,
+html:not(.dark) .auth-page-wrap textarea:focus {
+  border-color: rgba(65,88,245,0.6) !important;
+  box-shadow: 0 0 0 2px rgba(65,88,245,0.2) !important;
+}
+html:not(.dark) .auth-page-wrap .hover\:text-white:hover { color: #ffffff !important; }
+html:not(.dark) .auth-page-wrap .font-mono { color: #e2e8f0 !important; }
+
 /* ── Page / section backgrounds ─────────────────────────────── */
 html:not(.dark) .bg-slate-950   { background-color: #f1f5f9 !important; }
 html:not(.dark) .bg-slate-900   { background-color: #f8fafc !important; }

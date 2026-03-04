@@ -11,8 +11,8 @@ interface AuthContextType {
   user: User | null
   token: string | null
   loading: boolean
-  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>
-  register: (name: string, email: string, password: string) => Promise<{ ok: boolean; error?: string }>
+  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string; pending?: boolean; demo_code?: string; email?: string }>
+  register: (name: string, email: string, password: string) => Promise<{ ok: boolean; pending?: boolean; demo_code?: string; email?: string; error?: string }>
   logout: () => void
   completeLogin: (token: string, user: User) => void
 }
@@ -41,7 +41,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, password }),
     })
     const data = await res.json()
-    if (!res.ok) return { ok: false, error: data.error || 'Login failed' }
+    if (!res.ok) {
+      // 403 means unverified email — surface pending state to the UI
+      if (res.status === 403 && data.pending)
+        return { ok: false, pending: true, demo_code: data.demo_code, email: data.email, error: data.error }
+      return { ok: false, error: data.error || 'Login failed' }
+    }
     setToken(data.token)
     setUser(data.user)
     localStorage.setItem('token', data.token)
@@ -57,10 +62,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
     const data = await res.json()
     if (!res.ok) return { ok: false, error: data.error || 'Registration failed' }
-    setToken(data.token)
-    setUser(data.user)
-    localStorage.setItem('token', data.token)
-    localStorage.setItem('user', JSON.stringify(data.user))
+    // pending = true means email verification OTP was sent
+    if (data.pending) return { ok: true, pending: true, demo_code: data.demo_code, email: data.email }
+    // legacy: immediate login (shouldn't happen with new server)
+    if (data.token) {
+      setToken(data.token); setUser(data.user)
+      localStorage.setItem('token', data.token)
+      localStorage.setItem('user', JSON.stringify(data.user))
+    }
     return { ok: true }
   }
 
