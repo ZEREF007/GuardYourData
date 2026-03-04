@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Shield, Eye, EyeOff, CheckCircle, XCircle, Loader2, KeyRound, RotateCcw, ShieldCheck, Mail } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
 import clsx from 'clsx'
 
 const API = '/api'
@@ -32,6 +33,7 @@ export default function AuthPage() {
   const [loading, setLoading]      = useState(false)
   const [error, setError]          = useState('')
   const { register, completeLogin, login } = useAuth()
+  const { isDark } = useTheme()
   const nav = useNavigate()
 
   const resetState = (m: Mode) => { setMode(m); setError(''); setOtp(''); setDemoCode(''); setEmailSent(false) }
@@ -168,7 +170,7 @@ export default function AuthPage() {
   )
 
   return (
-    <div className="auth-page-wrap dark min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4 py-12">
+    <div className={clsx('auth-page-wrap bg-slate-950 min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4 py-12', isDark && 'dark')}>
       <div className="w-full max-w-md">
 
         <div className="text-center mb-8">

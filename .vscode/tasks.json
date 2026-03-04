@@ -120,6 +120,63 @@
 			"type": "shell",
 			"command": "cd client && npm run build",
 			"problemMatcher": []
+		},
+		{
+			"label": "Check MySQL",
+			"type": "shell",
+			"command": "brew services list 2>/dev/null | grep -i mysql; which mysql 2>/dev/null && mysql --version 2>/dev/null; lsof -i :3306 2>/dev/null | head -5; echo '---done---'"
+		},
+		{
+			"label": "Start MySQL",
+			"type": "shell",
+			"command": "mysqld_safe --datadir=/opt/anaconda3/var/mysql &",
+			"isBackground": true
+		},
+		{
+			"label": "Check MySQL Port",
+			"type": "shell",
+			"command": "sleep 3 && lsof -i :3306 | head -5; echo 'port check done'; ls /opt/anaconda3/var/mysql 2>/dev/null | head -3 || echo 'datadir not found'"
+		},
+		{
+			"label": "Find MySQL Config",
+			"type": "shell",
+			"command": "cat /opt/anaconda3/etc/my.cnf 2>/dev/null || cat /opt/anaconda3/my.cnf 2>/dev/null || echo 'no config'; find /opt/anaconda3 -name 'mysqld' -type f 2>/dev/null | head -3; find /opt/anaconda3 -name '*.pid' 2>/dev/null | head -3"
+		},
+		{
+			"label": "Locate MySQL",
+			"type": "shell",
+			"command": "find /opt/anaconda3 -name 'mysqld' 2>/dev/null; find /opt/anaconda3/var -maxdepth 2 -type d 2>/dev/null | head -10; find ~ -name 'my.cnf' 2>/dev/null | head -5; echo done"
+		},
+		{
+			"label": "Init MySQL",
+			"type": "shell",
+			"command": "mkdir -p /opt/anaconda3/var/mysql && mysqld --initialize --user=$(whoami) --datadir=/opt/anaconda3/var/mysql 2>&1 | tee /tmp/mysql_init.log; grep 'temporary password' /tmp/mysql_init.log || echo 'check /tmp/mysql_init.log'"
+		},
+		{
+			"label": "Run MySQL Server",
+			"type": "shell",
+			"command": "mysqld --datadir=/opt/anaconda3/var/mysql --lc-messages-dir=/opt/anaconda3/share/mysql-8.4/english --pid-file=/opt/anaconda3/var/mysql/mysql.pid --socket=/tmp/mysql.sock &",
+			"isBackground": true
+		},
+		{
+			"label": "Verify MySQL Running",
+			"type": "shell",
+			"command": "sleep 4 && lsof -i :3306 | head -5; echo '---port check---'"
+		},
+		{
+			"label": "Start MySQL v2",
+			"type": "shell",
+			"command": "mysqld --datadir=/opt/anaconda3/var/mysql --socket=/tmp/mysql.sock --port=3306 2>/tmp/mysqld.log & sleep 5 && cat /tmp/mysqld.log | tail -10; lsof -i :3306 | head -3; echo done"
+		},
+		{
+			"label": "Setup MySQL DB",
+			"type": "shell",
+			"command": "mysql --socket=/tmp/mysql.sock -u root --password='AZravpkXi8>2' --connect-expired-password -e \"ALTER USER 'root'@'localhost' IDENTIFIED BY 'Ace1234!'; CREATE DATABASE IF NOT EXISTS T1; CREATE USER IF NOT EXISTS 'Ace'@'localhost' IDENTIFIED BY 'Ace1234!'; GRANT ALL PRIVILEGES ON T1.* TO 'Ace'@'localhost'; FLUSH PRIVILEGES;\" 2>&1 && echo 'Setup complete!'"
+		},
+		{
+			"label": "Test MySQL Connection",
+			"type": "shell",
+			"command": "mysql -u Ace -p'Ace1234!' -h 127.0.0.1 -P 3306 T1 -e 'SELECT DATABASE(), USER();' 2>&1"
 		}
 	]
 }
