@@ -8,10 +8,11 @@ import {
   Users, BarChart2, Video, Save, Loader2, CheckCircle, Shield,
   Settings, TrendingUp, Copy, ExternalLink, CheckCheck, Search,
   Trash2, ChevronUp, ChevronDown, Download, Crown, UserMinus,
-  AlertTriangle, X,
+  AlertTriangle, X, MessageSquare,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import clsx from 'clsx'
+import { QUIZ_DATA } from '../data/quizData'
 
 const VIDEO_MODULES = [
   { id: 'overview', label: 'Overview / Introduction' },
@@ -29,6 +30,18 @@ interface Stats {
   regTimeline: { day: string; count: number }[]
   scoreBuckets: { below40: number; p40_70: number; p70_90: number; above90: number }
   pageStats: { page: string; visits: number }[]
+  moduleSummary: { module_id: string; users_completed: number }[]
+  totalFeedback: number
+}
+
+interface FeedbackRow {
+  id: number
+  name: string
+  email: string
+  age_group: string
+  industry: string
+  remarks: string
+  submitted_at: string
 }
 
 interface UserRow {
@@ -52,11 +65,15 @@ export default function AdminPage() {
 
   const [stats, setStats]           = useState<Stats | null>(null)
   const [allUsers, setAllUsers]     = useState<UserRow[]>([])
+  const [feedbacks, setFeedbacks]   = useState<FeedbackRow[]>([])
+  const [feedbackLoading, setFbLoading] = useState(false)
   const [videoUrls, setVideoUrls]   = useState<Record<string, string>>({})
   const [savingId, setSavingId]     = useState<string | null>(null)
   const [savedId, setSavedId]       = useState<string | null>(null)
-  const [tab, setTab]               = useState<'stats' | 'videos' | 'users' | 'setup'>('stats')
+  const [tab, setTab]               = useState<'stats' | 'videos' | 'users' | 'setup' | 'feedback' | 'answers'>('stats')
   const [copied, setCopied]         = useState(false)
+  const [answerSearch, setAnswerSearch] = useState('')
+  const [answerFilter, setAnswerFilter] = useState<'all' | 'basic' | 'intermediate' | 'advanced'>('all')
 
   // User management state
   const [userSearch, setUserSearch]           = useState('')
@@ -71,6 +88,14 @@ export default function AdminPage() {
     fetch('/api/admin/users', { headers: authHeaders }).then(r => r.json()).then(d => {
       if (d.users) setAllUsers(d.users)
     })
+  }
+
+  const loadFeedback = () => {
+    setFbLoading(true)
+    fetch('/api/admin/feedback', { headers: authHeaders })
+      .then(r => r.json())
+      .then(d => { if (d.feedback) setFeedbacks(d.feedback) })
+      .finally(() => setFbLoading(false))
   }
 
   useEffect(() => {
@@ -148,6 +173,28 @@ export default function AdminPage() {
       })
   }
 
+  const exportFeedbackCsv = () => {
+    fetch('/api/admin/export-feedback', { headers: authHeaders })
+      .then(r => r.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = 'feedback_export.csv'; a.click()
+        URL.revokeObjectURL(url)
+      })
+  }
+
+  const exportFeedbackExcel = () => {
+    fetch('/api/admin/export-feedback-excel', { headers: authHeaders })
+      .then(r => r.blob())
+      .then(blob => {
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url; a.download = 'feedback_export.xlsx'; a.click()
+        URL.revokeObjectURL(url)
+      })
+  }
+
   // ── Video actions ─────────────────────────────────────
   const saveVideo = async (moduleId: string) => {
     setSavingId(moduleId)
@@ -160,6 +207,9 @@ export default function AdminPage() {
     setSavedId(moduleId)
     setTimeout(() => setSavedId(null), 2000)
   }
+
+  // ── feedbacks load on tab change ─────────────────────
+  useEffect(() => { if (tab === 'feedback') loadFeedback() }, [tab]) // eslint-disable-line
 
   // ── Chart data ────────────────────────────────────────
   const scoreBucketsData = stats ? [
@@ -212,10 +262,12 @@ export default function AdminPage() {
           </div>
           <div className="flex gap-2 mt-6 flex-wrap">
             {([
-              { id: 'stats',  label: '📊 Analytics' },
-              { id: 'videos', label: '🎥 Videos'    },
-              { id: 'users',  label: `👥 Users${allUsers.length ? ` (${allUsers.length})` : ''}` },
-              { id: 'setup',  label: '⚙️ Setup'    },
+              { id: 'stats',    label: '📊 Analytics' },
+              { id: 'videos',   label: '🎥 Videos'    },
+              { id: 'users',    label: `👥 Users${allUsers.length ? ` (${allUsers.length})` : ''}` },
+              { id: 'feedback', label: `💬 Feedback${stats?.totalFeedback ? ` (${stats.totalFeedback})` : ''}` },
+              { id: 'answers',  label: `📋 Answers (${QUIZ_DATA.length})` },
+              { id: 'setup',    label: '⚙️ Setup'    },
             ] as const).map(t => (
               <motion.button
                 key={t.id}
@@ -327,6 +379,33 @@ export default function AdminPage() {
                     <Bar dataKey="count" fill="#6366f1" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Module Completion Breakdown */}
+            {stats && (
+              <div className="card">
+                <h2 className="text-white font-bold mb-1">Module Completion</h2>
+                <p className="text-slate-500 text-xs mb-4">Unique learners who completed each module</p>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  {['1','2','3','4','5'].map(mid => {
+                    const row = stats.moduleSummary.find(m => m.module_id === mid)
+                    const count = row?.users_completed ?? 0
+                    const total = stats.totals.users || 1
+                    const pct = Math.round((count / total) * 100)
+                    return (
+                      <div key={mid} className="bg-slate-800/40 border border-slate-700/30 rounded-2xl p-4 text-center">
+                        <div className="text-2xl mb-1">{['📖','🔍','📊','🛡️','📋'][Number(mid)-1]}</div>
+                        <div className="text-white font-extrabold text-2xl tabular-nums">{count}</div>
+                        <div className="text-slate-500 text-[10px] font-semibold uppercase tracking-wide mt-0.5">Module {mid}</div>
+                        <div className="mt-2 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                          <div className="h-full bg-brand-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                        <div className="text-slate-500 text-[10px] mt-1">{pct}% of users</div>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
 
@@ -564,6 +643,166 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* ══ FEEDBACK TAB ═══════════════════════════════════ */}
+        {tab === 'feedback' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+              <div>
+                <h2 className="text-white font-bold text-lg">User Feedback</h2>
+                <p className="text-slate-500 text-xs mt-0.5">{feedbacks.length} submission{feedbacks.length !== 1 ? 's' : ''} received</p>
+              </div>
+              <div className="flex gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                  onClick={loadFeedback}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-brand-700/30 border border-brand-700/40 rounded-xl text-brand-300 text-sm font-semibold hover:bg-brand-700/50 transition-all"
+                >
+                  {feedbackLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : '🔄'} Refresh
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                  onClick={exportFeedbackExcel}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-emerald-700/30 border border-emerald-700/40 rounded-xl text-emerald-300 text-sm font-semibold hover:bg-emerald-700/50 transition-all"
+                >
+                  <Download className="w-4 h-4" /> Export Excel
+                </motion.button>
+              </div>
+            </div>
+
+            {feedbackLoading && !feedbacks.length && (
+              <div className="flex justify-center py-16">
+                <Loader2 className="w-8 h-8 text-brand-400 animate-spin" />
+              </div>
+            )}
+
+            {!feedbackLoading && feedbacks.length === 0 && (
+              <div className="card text-center py-16">
+                <MessageSquare className="w-12 h-12 text-slate-700 mx-auto mb-3" />
+                <p className="text-slate-500 text-sm">No feedback submitted yet.</p>
+                <p className="text-slate-600 text-xs mt-1">Share the <code className="text-brand-400">/feedback</code> page with your users.</p>
+              </div>
+            )}
+
+            {feedbacks.length > 0 && (
+              <div className="card overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-slate-500 border-b border-slate-700/50 text-xs uppercase tracking-wide">
+                      <th className="text-left py-2 pr-4 font-semibold">Name</th>
+                      <th className="text-left py-2 pr-4 font-semibold">Email</th>
+                      <th className="text-left py-2 pr-4 font-semibold">Age Group</th>
+                      <th className="text-left py-2 pr-4 font-semibold">Industry</th>
+                      <th className="text-left py-2 pr-4 font-semibold">Remarks</th>
+                      <th className="text-left py-2 font-semibold">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {feedbacks.map(fb => (
+                      <tr key={fb.id} className="border-b border-slate-800/40 last:border-0 hover:bg-slate-800/20 transition-colors">
+                        <td className="py-3 pr-4 text-white font-medium whitespace-nowrap">{fb.name}</td>
+                        <td className="py-3 pr-4 text-slate-400 text-xs">{fb.email}</td>
+                        <td className="py-3 pr-4">
+                          <span className="px-2 py-0.5 bg-blue-700/20 text-blue-300 rounded-full text-xs font-semibold">{fb.age_group}</span>
+                        </td>
+                        <td className="py-3 pr-4">
+                          <span className="px-2 py-0.5 bg-purple-700/20 text-purple-300 rounded-full text-xs font-semibold whitespace-nowrap">{fb.industry}</span>
+                        </td>
+                        <td className="py-3 pr-4 text-slate-400 text-xs max-w-xs">
+                          {fb.remarks ? (
+                            <span className="line-clamp-2" title={fb.remarks}>{fb.remarks}</span>
+                          ) : (
+                            <span className="text-slate-600 italic">—</span>
+                          )}
+                        </td>
+                        <td className="py-3 text-slate-500 text-xs whitespace-nowrap">
+                          {new Date(fb.submitted_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══ ANSWERS TAB ════════════════════════════════════ */}
+        {tab === 'answers' && (() => {
+          const diffColor = (d: string) =>
+            d === 'basic' ? 'bg-emerald-700/20 text-emerald-300'
+            : d === 'intermediate' ? 'bg-amber-700/20 text-amber-300'
+            : 'bg-red-700/20 text-red-300'
+          const filtered = QUIZ_DATA.filter(q =>
+            (answerFilter === 'all' || q.difficulty === answerFilter) &&
+            (!answerSearch || q.question.toLowerCase().includes(answerSearch.toLowerCase()) ||
+              q.module.toLowerCase().includes(answerSearch.toLowerCase()))
+          )
+          return (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+                <div>
+                  <h2 className="text-white font-bold text-lg">Answer Key</h2>
+                  <p className="text-slate-500 text-xs mt-0.5">{filtered.length} of {QUIZ_DATA.length} questions — correct answers highlighted in green</p>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {(['all','basic','intermediate','advanced'] as const).map(f => (
+                    <button key={f}
+                      onClick={() => setAnswerFilter(f)}
+                      className={clsx('px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all',
+                        answerFilter === f ? 'bg-brand-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700')}
+                    >{f}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  value={answerSearch}
+                  onChange={e => setAnswerSearch(e.target.value)}
+                  placeholder="Search questions or modules…"
+                  className="w-full pl-9 pr-4 py-2.5 bg-slate-800/60 border border-slate-700/40 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+              <div className="space-y-3">
+                {filtered.map(q => (
+                  <div key={q.id} className="card p-4 border border-slate-800/60">
+                    <div className="flex items-start gap-3 mb-3">
+                      <span className="w-8 h-8 rounded-lg bg-brand-600/20 text-brand-300 text-sm font-bold flex items-center justify-center shrink-0">Q{q.id}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap gap-2 mb-1.5">
+                          <span className="text-xs font-semibold text-slate-400">{q.module}</span>
+                          <span className={clsx('px-2 py-0.5 rounded-full text-xs font-semibold capitalize', diffColor(q.difficulty))}>{q.difficulty}</span>
+                          {q.section_ref && <span className="text-xs text-slate-600 italic">{q.section_ref}</span>}
+                        </div>
+                        <p className="text-white text-sm font-medium leading-snug">{q.question}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 ml-11">
+                      {q.options.map((opt, i) => (
+                        <div key={i} className={clsx(
+                          'flex items-start gap-2 px-3 py-2 rounded-lg text-xs border',
+                          i === q.correct
+                            ? 'bg-emerald-900/30 border-emerald-600/40 text-emerald-300 font-semibold'
+                            : 'bg-slate-800/30 border-slate-700/30 text-slate-400'
+                        )}>
+                          <span className={clsx('shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold',
+                            i === q.correct ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-400'
+                          )}>{String.fromCharCode(65+i)}</span>
+                          <span>{opt}{i === q.correct ? ' ✓' : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <details className="mt-3 ml-11">
+                      <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-300 transition-colors select-none">▸ Show explanation</summary>
+                      <p className="mt-2 text-xs text-slate-400 leading-relaxed border-l-2 border-brand-600/40 pl-3">{q.explanation}</p>
+                    </details>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ══ SETUP TAB ══════════════════════════════════════ */}
         {tab === 'setup' && (

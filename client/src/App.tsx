@@ -13,6 +13,7 @@ import AuthPage from './pages/AuthPage'
 import AdminPage from './pages/AdminPage'
 import GamePage from './pages/GamePage'
 import ThankYouPage from './pages/ThankYouPage'
+import FeedbackPage from './pages/FeedbackPage'
 import LivePage from './pages/LivePage'
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/game" element={<GamePage />} />
             <Route path="/live" element={<LivePage />} />
+            <Route path="/feedback" element={<FeedbackPage />} />
             <Route path="/thankyou" element={<ThankYouPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

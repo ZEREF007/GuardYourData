@@ -177,6 +177,92 @@
 			"label": "Test MySQL Connection",
 			"type": "shell",
 			"command": "mysql -u Ace -p'Ace1234!' -h 127.0.0.1 -P 3306 T1 -e 'SELECT DATABASE(), USER();' 2>&1"
+		},
+		{
+			"label": "Install nodemailer",
+			"type": "shell",
+			"command": "cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && npm install nodemailer && echo 'DONE'",
+			"isBackground": false
+		},
+		{
+			"label": "Restart Server Now",
+			"type": "shell",
+			"command": "lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1; cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && node server.js",
+			"isBackground": true
+		},
+		{
+			"label": "Restart + Email Check",
+			"type": "shell",
+			"command": "lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1; cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && node server.js",
+			"isBackground": true
+		},
+		{
+			"label": "Test Email Send",
+			"type": "shell",
+			"command": "cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && node -e \"\nconst fs = require('fs'), path = require('path');\nfs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\\n').forEach(line => { const m = line.match(/^\\s*([\\w]+)\\s*=\\s*(.*)\\s*$/); if (m) process.env[m[1]] = m[2].trim(); });\nconsole.log('GMAIL_USER:', process.env.GMAIL_USER);\nconsole.log('GMAIL_PASS length:', process.env.GMAIL_PASS ? process.env.GMAIL_PASS.length : 0);\nconst nodemailer = require('nodemailer');\nconst t = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS } });\nt.sendMail({ from: process.env.GMAIL_USER, to: process.env.GMAIL_USER, subject: 'Test', html: '<p>Test email works!</p>' }).then(() => console.log('SUCCESS - email sent!')).catch(e => console.error('FAILED:', e.message));\n\"",
+			"isBackground": false
+		},
+		{
+			"label": "Test Email Send 2",
+			"type": "shell",
+			"command": "cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && node -e \"\nconst fs = require('fs'), path = require('path');\nfs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\\n').forEach(line => { const m = line.match(/^\\s*([\\w]+)\\s*=\\s*(.*)\\s*$/); if (m) process.env[m[1]] = m[2].trim(); });\nconsole.log('GMAIL_USER:', process.env.GMAIL_USER);\nconsole.log('GMAIL_PASS length:', process.env.GMAIL_PASS ? process.env.GMAIL_PASS.length : 0);\nconst nodemailer = require('nodemailer');\nconst t = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS } });\nt.sendMail({ from: process.env.GMAIL_USER, to: process.env.GMAIL_USER, subject: 'Test from FIN7900', html: '<p>Email is working!</p>' }).then(() => console.log('SUCCESS')).catch(e => console.error('FAILED:', e.message));\n\"",
+			"isBackground": false
+		},
+		{
+			"label": "Test Email Send 3",
+			"type": "shell",
+			"command": "cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && node -e \"\nconst fs = require('fs'), path = require('path');\nfs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\\n').forEach(line => { const m = line.match(/^\\s*([\\w]+)\\s*=\\s*(.*)\\s*$/); if (m) process.env[m[1]] = m[2].trim(); });\nconsole.log('PASS length:', process.env.GMAIL_PASS.length);\nconst nodemailer = require('nodemailer');\nconst t = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 465, secure: true, auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS } });\nt.sendMail({ from: process.env.GMAIL_USER, to: process.env.GMAIL_USER, subject: 'FIN7900 Email Test', html: '<p>Email is working! Your OTP system is live.</p>' }).then(() => console.log('SUCCESS - check your inbox!')).catch(e => console.error('FAILED:', e.message));\n\"",
+			"isBackground": false
+		},
+		{
+			"label": "Reorganize files",
+			"type": "shell",
+			"command": "node -e \"const fs=require('fs'),base='/Users/ace/Desktop/Individual Assignment FIN7900'; fs.mkdirSync(base+'/extra',{recursive:true}); ['FIN7900 Individual Assignment Requirements and Guidelines.docx','FIN7900 Individual Assignment Requirements and Guidelines.pdf','FIN7900 Individual Assignment Requirements and Guidelines.txt','Module_Content_for_Video_Scripts.md'].forEach(f=>{try{fs.renameSync(base+'/'+f,base+'/extra/'+f)}catch(e){}}); ['client/src/context/LanguageContext.tsx','client/src/hooks/useTranslate.ts','client/src/services/translationApi.ts'].forEach(f=>{try{fs.unlinkSync(base+'/'+f)}catch(e){}}); ['client/src/hooks','client/src/services'].forEach(d=>{try{fs.rmdirSync(base+'/'+d)}catch(e){}}); console.log('Done. extra:',fs.readdirSync(base+'/extra').join(', '));\""
+		},
+		{
+			"label": "Test Resend API",
+			"type": "shell",
+			"command": "cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && node -e \"const fs=require('fs'),path=require('path'); fs.readFileSync(path.join(__dirname,'.env'),'utf8').split('\\n').forEach(line=>{const m=line.match(/^\\s*([\\w]+)\\s*=\\s*(.*)\\s*$/);if(m&&!process.env[m[1]])process.env[m[1]]=m[2].trim()}); console.log('RESEND_API_KEY set:',!!process.env.RESEND_API_KEY); fetch('https://api.resend.com/emails',{method:'POST',headers:{'Authorization':'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:'onboarding@resend.dev',to:'icyace007@gmail.com',subject:'FIN7900 OTP Test',html:'<p>Resend is working! OTP delivery is now live.</p>'})}).then(r=>r.json()).then(d=>console.log('Result:',JSON.stringify(d))).catch(e=>console.error('Error:',e.message));\"",
+			"isBackground": false
+		},
+		{
+			"label": "Test Resend Domain",
+			"type": "shell",
+			"command": "cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && node -e \"const fs=require('fs'),path=require('path'); fs.readFileSync(path.join(__dirname,'.env'),'utf8').split('\\n').forEach(line=>{const m=line.match(/^\\s*([\\w]+)\\s*=\\s*(.*)\\s*$/);if(m&&!process.env[m[1]])process.env[m[1]]=m[2].trim()}); fetch('https://api.resend.com/emails',{method:'POST',headers:{'Authorization':'Bearer '+process.env.RESEND_API_KEY,'Content-Type':'application/json'},body:JSON.stringify({from:'GuardYourData <noreply@guardyourdata.onrender.com>',to:'icyace007@gmail.com',subject:'FIN7900 OTP Test',html:'<p>Your OTP is: <strong>123456</strong></p>'})}).then(r=>r.json()).then(d=>console.log(JSON.stringify(d))).catch(e=>console.error(e.message));\"",
+			"isBackground": false
+		},
+		{
+			"label": "Delete junk files",
+			"type": "shell",
+			"command": "node -e \"const fs=require('fs'),b='/Users/ace/Desktop/Individual Assignment FIN7900'; ['start-mysql.sh','~\\$dule_Content_for_Video_Scripts.md'].forEach(f=>{try{fs.unlinkSync(b+'/'+f);console.log('deleted:',f)}catch(e){console.log('skip:',f)}}); console.log('root:',fs.readdirSync(b).filter(f=>!f.startsWith('.')).join(', '));\""
+		},
+		{
+			"label": "Force Clean Build + Restart",
+			"type": "shell",
+			"command": "cd client && rm -rf node_modules/.vite .vite && npm run build && lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1; cd .. && node server.js",
+			"isBackground": true,
+			"group": "build"
+		},
+		{
+			"label": "Install xlsx + Build + Restart",
+			"type": "shell",
+			"command": "npm install && cd client && npm run build && cd .. && lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1; node server.js",
+			"isBackground": true,
+			"group": "build"
+		},
+		{
+			"label": "Kill and restart server",
+			"type": "shell",
+			"command": "lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1; node server.js",
+			"isBackground": true,
+			"group": "build"
+		},
+		{
+			"label": "Git status check",
+			"type": "shell",
+			"command": "cd \"/Users/ace/Desktop/Individual Assignment FIN7900\" && git add -A && git status --short",
+			"isBackground": false,
+			"group": "build"
 		}
 	]
 }

@@ -22,42 +22,7 @@ const jwt      = require('jsonwebtoken');
 const Database = require('better-sqlite3');
 const cors     = require('cors');
 const https    = require('https');
-
-// ─── Nodemailer ──────────────────────────────────────────────────────────────
-let nodemailer = null;
-try { nodemailer = require('nodemailer'); } catch (e) {
-  console.error('  ⚠️  nodemailer not found — run: npm install nodemailer');
-}
-
-function buildTransporter() {
-  if (!nodemailer) { console.error('  ⚠️  nodemailer not installed'); return null; }
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_PASS) {
-    console.error('  ⚠️  GMAIL_USER or GMAIL_PASS not set in .env');
-    return null;
-  }
-  return nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS },
-  });
-}
-
-async function sendEmail(to, subject, html) {
-  console.log(`  ✉️  Attempting email → ${to}`);
-  const t = buildTransporter();
-  if (!t) return;
-  try {
-    await t.sendMail({
-      from: `"GuardYourData Training" <${process.env.GMAIL_USER}>`,
-      to, subject, html,
-    });
-    console.log(`  ✅  [EMAIL SENT] → ${to}`);
-  } catch (err) {
-    console.error(`  ❌  Email send FAILED → ${to}`);
-    console.error(`      Error: ${err.message}`);
-  }
-}
+const XLSX     = require('xlsx');
 
 // ─── Config ────────────────────────────────────────────────
 const PORT       = process.env.PORT || 3000;
@@ -127,15 +92,6 @@ db.exec(`
     used       INTEGER NOT NULL DEFAULT 0
   );
 
-  CREATE TABLE IF NOT EXISTS translation_cache (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    source     TEXT    NOT NULL,
-    target     TEXT    NOT NULL,
-    result     TEXT    NOT NULL,
-    created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(source, target)
-  );
-
   CREATE TABLE IF NOT EXISTS module_completions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -144,6 +100,16 @@ db.exec(`
     mcq_total    INTEGER,
     completed_at TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(user_id, module_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS feedback (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT    NOT NULL,
+    email        TEXT    NOT NULL,
+    age_group    TEXT    NOT NULL,
+    industry     TEXT    NOT NULL,
+    remarks      TEXT    NOT NULL DEFAULT '',
+    submitted_at TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 `);
 
@@ -159,6 +125,21 @@ try { db.exec("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFA
   if (user && user.role !== 'admin') {
     db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(ADMIN_EMAIL);
     console.log(`  ✅  Promoted ${ADMIN_EMAIL} to admin`);
+  }
+})();
+
+// ─── Startup: ensure superuser ace0404@admin.com exists ────────
+(function ensureSuperuser() {
+  const SU_EMAIL = 'ace0404@admin.com';
+  const existing = db.prepare('SELECT id, role FROM users WHERE email = ?').get(SU_EMAIL);
+  if (!existing) {
+    const hash = bcrypt.hashSync('Qwertyuiop!123', 12);
+    db.prepare('INSERT INTO users (name, email, password, role, email_verified) VALUES (?,?,?,?,1)')
+      .run('Ace Admin', SU_EMAIL, hash, 'admin');
+    console.log('  ✅  Created superuser ace0404@admin.com');
+  } else if (existing.role !== 'admin') {
+    db.prepare("UPDATE users SET role='admin' WHERE email=?").run(SU_EMAIL);
+    console.log('  ✅  Promoted ace0404@admin.com to admin');
   }
 })();
 
@@ -210,34 +191,15 @@ app.post('/api/auth/register', (req, res) => {
   const role = cleanEmail === 'icyace007@gmail.com' ? 'admin' : 'learner';
 
   const hash = bcrypt.hashSync(password, 12);  // 12 rounds for stronger hashing
-  const info = db.prepare('INSERT INTO users (name, email, password, role, email_verified) VALUES (?, ?, ?, ?, 0)')
+  const info = db.prepare('INSERT INTO users (name, email, password, role, email_verified) VALUES (?, ?, ?, ?, 1)')
                  .run(name.trim(), cleanEmail, hash, role);
 
-  // Send email verification OTP — user must verify before first login
-  cleanExpiredOtps();
+  // Demo mode: generate a display code (cosmetic only) and issue JWT immediately
   const code = generateOtp();
-  const otpHash = bcrypt.hashSync(code, 8);
-  db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', datetime('now','+30 minutes'))")
-    .run(cleanEmail, otpHash);
-  console.log(`  ✉️  [EMAIL VERIFY OTP] ${cleanEmail} → ${code}  (expires in 30 min)`);
-
-  // Send real email (falls back to console.log if SMTP not configured)
-  sendEmail(
-    cleanEmail,
-    'Verify your GuardYourData account',
-    `<div style="font-family:sans-serif;max-width:480px;margin:auto">
-      <h2 style="color:#6366f1">GuardYourData Training</h2>
-      <p>Welcome, <strong>${name.trim()}</strong>! Please verify your email to complete registration.</p>
-      <div style="background:#1e293b;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
-        <p style="color:#94a3b8;font-size:13px;margin-bottom:8px">Your verification code</p>
-        <p style="color:#fff;font-size:36px;font-weight:900;letter-spacing:0.4em;margin:0">${code}</p>
-        <p style="color:#64748b;font-size:12px;margin-top:8px">Expires in 30 minutes</p>
-      </div>
-      <p style="color:#94a3b8;font-size:13px">If you did not create an account, you can safely ignore this email.</p>
-    </div>`
-  );
-
-  res.json({ pending: true, email: cleanEmail, message: 'Verify your email to complete registration.' });
+  const newUser = { id: info.lastInsertRowid, name: name.trim(), email: cleanEmail, role };
+  const token = jwt.sign({ id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  console.log(`  ✅  [REG] ${cleanEmail} — auto-verified, demo code: ${code}`);
+  res.json({ token, user: newUser, demo_code: code });
 });
 
 // POST /api/auth/login
@@ -258,21 +220,8 @@ app.post('/api/auth/login', (req, res) => {
     const otpHash = bcrypt.hashSync(code, 8);
     db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', datetime('now','+30 minutes'))")
       .run(user.email, otpHash);
-    console.log(`  ✉️  [RE-VERIFY OTP] ${user.email} → ${code}`);
-    sendEmail(
-      user.email,
-      'Verify your GuardYourData account',
-      `<div style="font-family:sans-serif;max-width:480px;margin:auto">
-        <h2 style="color:#6366f1">GuardYourData Training</h2>
-        <p>Your email still needs verification. Use the code below to verify it.</p>
-        <div style="background:#1e293b;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
-          <p style="color:#94a3b8;font-size:13px;margin-bottom:8px">Verification code</p>
-          <p style="color:#fff;font-size:36px;font-weight:900;letter-spacing:0.4em;margin:0">${code}</p>
-          <p style="color:#64748b;font-size:12px;margin-top:8px">Expires in 30 minutes</p>
-        </div>
-      </div>`
-    );
-    return res.status(403).json({ error: 'Please verify your email first.', pending: true, email: user.email });
+    console.log(`  🔑  [OTP] ${user.email} → ${code}`);
+    return res.status(403).json({ error: 'Please verify your email first.', pending: true, email: user.email, demo_code: code });
   }
 
   // Record last login IP
@@ -311,21 +260,7 @@ app.post('/api/auth/forgot', (req, res) => {
   const hash = bcrypt.hashSync(code, 8);
   db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'reset', datetime('now','+10 minutes'))").run(email.toLowerCase().trim(), hash);
   console.log(`  🔑  [RESET OTP] ${email} → ${code}  (expires in 10 min)`);
-  sendEmail(
-    email.toLowerCase().trim(),
-    'Reset your GuardYourData password',
-    `<div style="font-family:sans-serif;max-width:480px;margin:auto">
-      <h2 style="color:#6366f1">GuardYourData Training</h2>
-      <p>You requested a password reset. Use the code below — it expires in 10 minutes.</p>
-      <div style="background:#1e293b;border-radius:12px;padding:24px;text-align:center;margin:24px 0">
-        <p style="color:#94a3b8;font-size:13px;margin-bottom:8px">Password reset code</p>
-        <p style="color:#fff;font-size:36px;font-weight:900;letter-spacing:0.4em;margin:0">${code}</p>
-        <p style="color:#64748b;font-size:12px;margin-top:8px">Expires in 10 minutes</p>
-      </div>
-      <p style="color:#94a3b8;font-size:13px">If you did not request a reset, ignore this email — your password is unchanged.</p>
-    </div>`
-  );
-  res.json({ ok: true, message: 'If this email exists, a code was sent.' });
+  res.json({ ok: true, demo_code: code, message: 'Demo mode: your reset code is shown below.' });
 });
 
 // POST /api/auth/reset-password  — verify OTP + set new password
@@ -568,10 +503,19 @@ app.get('/api/admin/stats', requireAuth, (req, res) => {
     FROM quiz_attempts
   `).get();
 
+  // Per-module completion counts
+  const moduleSummary = db.prepare(`
+    SELECT module_id, COUNT(DISTINCT user_id) as users_completed
+    FROM module_completions GROUP BY module_id ORDER BY module_id
+  `).all();
+
+  // Total feedback submissions
+  const totalFeedback = db.prepare('SELECT COUNT(*) as c FROM feedback').get().c;
+
   res.json({
     totals: { users: totalUsers, visits: totalVisits, quizzes: totalQuizzes, games: totalGames },
     rates:  { passRate, avgQuizPct, avgGameScore },
-    pageStats, pageUniq, recentUsers, regTimeline, scoreBuckets
+    pageStats, pageUniq, recentUsers, regTimeline, scoreBuckets, moduleSummary, totalFeedback
   });
 });
 
@@ -628,6 +572,66 @@ app.get('/api/admin/export-csv', requireAuth, (req, res) => {
   res.send([header, ...rows].join('\n'));
 });
 
+// POST /api/feedback  — public: submit a feedback entry
+app.post('/api/feedback', (req, res) => {
+  const { name, email, age_group, industry, remarks } = req.body || {};
+  if (!name || !email || !age_group || !industry)
+    return res.status(400).json({ error: 'Name, email, age group and industry are required.' });
+  db.prepare(
+    'INSERT INTO feedback (name, email, age_group, industry, remarks) VALUES (?, ?, ?, ?, ?)'
+  ).run(name.trim(), email.toLowerCase().trim(), age_group, industry, (remarks || '').trim());
+  res.json({ ok: true });
+});
+
+// GET /api/admin/feedback  — admin: list all feedback
+app.get('/api/admin/feedback', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const rows = db.prepare(
+    'SELECT id, name, email, age_group, industry, remarks, submitted_at FROM feedback ORDER BY submitted_at DESC'
+  ).all();
+  res.json({ feedback: rows });
+});
+
+// GET /api/admin/export-feedback  — admin: CSV download
+app.get('/api/admin/export-feedback', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const rows = db.prepare(
+    'SELECT id, name, email, age_group, industry, remarks, submitted_at FROM feedback ORDER BY submitted_at DESC'
+  ).all();
+  const header = 'id,name,email,age_group,industry,remarks,submitted_at';
+  const lines = rows.map(r =>
+    [r.id, `"${r.name.replace(/"/g,'""')}"`, `"${r.email}"`, `"${r.age_group}"`,
+     `"${r.industry}"`, `"${(r.remarks||'').replace(/"/g,'""')}"`, r.submitted_at].join(',')
+  );
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="feedback_export.csv"');
+  res.send([header, ...lines].join('\n'));
+});
+
+// GET /api/admin/export-feedback-excel  — admin: Excel .xlsx download
+app.get('/api/admin/export-feedback-excel', requireAuth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  const rows = db.prepare(
+    'SELECT id, name, email, age_group, industry, remarks, submitted_at FROM feedback ORDER BY submitted_at DESC'
+  ).all();
+  const ws = XLSX.utils.json_to_sheet(rows.map(r => ({
+    'ID':           r.id,
+    'Name':         r.name,
+    'Email':        r.email,
+    'Age Group':    r.age_group,
+    'Industry':     r.industry,
+    'Remarks':      r.remarks || '',
+    'Submitted At': r.submitted_at
+  })));
+  ws['!cols'] = [{wch:5},{wch:25},{wch:35},{wch:15},{wch:25},{wch:65},{wch:22}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Feedback');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="feedback_export.xlsx"');
+  res.send(buf);
+});
+
 // POST /api/admin/seed  — make yourself admin (only works if you have no admins yet)
 app.post('/api/admin/seed', requireAuth, (req, res) => {
   const adminCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE role='admin'").get().c;
@@ -680,56 +684,6 @@ app.get('/api/live/cisa', async (req, res) => {
   }
 });
 
-// ─── Translation API (MyMemory, free, no key) ─────────────────
-// Language code mapping from app lang to MyMemory langpair
-const LANG_MAP = { zh: 'zh-CN', es: 'es', ne: 'ne-NP' };
-
-// Helper: call MyMemory for a single text string
-function myMemoryTranslate(text, targetLang) {
-  return new Promise((resolve) => {
-    const langpair = `en|${LANG_MAP[targetLang] || targetLang}`;
-    const encoded  = encodeURIComponent(text.slice(0, 480)); // MyMemory 500 char limit
-    const url = `https://api.mymemory.translated.world/get?q=${encoded}&langpair=${langpair}`;
-    fetchHttps(url)
-      .then(data => {
-        const translated = data?.responseData?.translatedText;
-        resolve((translated && translated !== text) ? translated : text);
-      })
-      .catch(() => resolve(text)); // fallback: return original
-  });
-}
-
-// POST /api/translate  — translate an array of texts to a target language
-// Body: { texts: string[], targetLang: 'zh' | 'es' | 'ne' }
-// Returns: { results: string[] }
-app.post('/api/translate', async (req, res) => {
-  const { texts, targetLang } = req.body || {};
-  if (!Array.isArray(texts) || !targetLang || targetLang === 'en') {
-    return res.json({ results: texts || [] });
-  }
-
-  const results = [];
-  for (const text of texts) {
-    if (!text || !text.trim()) { results.push(text); continue; }
-    // Check cache first
-    const cacheKey = `${targetLang}:${text}`;
-    const cached = db.prepare('SELECT result FROM translation_cache WHERE source = ? AND target = ?').get(text, targetLang);
-    if (cached) {
-      results.push(cached.result);
-      continue;
-    }
-    // Call API
-    const translated = await myMemoryTranslate(text, targetLang);
-    // Store in cache
-    try {
-      db.prepare(`INSERT OR REPLACE INTO translation_cache (source, target, result) VALUES (?, ?, ?)`).run(text, targetLang, translated);
-    } catch (_) {}
-    results.push(translated);
-  }
-
-  res.json({ results });
-});
-
 // ─── Catch-all: serve React SPA index.html ────────────────
 app.get('*', (req, res) => {
   // Only catch non-API paths
@@ -747,9 +701,5 @@ app.listen(PORT, () => {
   console.log(`  Local:   http://localhost:${PORT}`);
   console.log(`  Auth:    http://localhost:${PORT}/auth.html`);
   console.log(`  DB:      ${DB_PATH}`);
-  if (process.env.GMAIL_USER && process.env.GMAIL_PASS) {
-    console.log(`  Email:   ✅  ${process.env.GMAIL_USER} (SMTP ready)\n`);
-  } else {
-    console.log(`  Email:   ❌  No credentials — check .env file\n`);
-  }
+  console.log(`  Mode:    🎯  Demo — OTP codes shown on screen\n`);
 });

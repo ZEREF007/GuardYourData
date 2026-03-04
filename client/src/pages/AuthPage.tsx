@@ -15,7 +15,7 @@ const checks = [
   { label: 'Special character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
 ]
 
-type Mode = 'login' | 'register' | 'forgot' | 'forgot-reset' | 'otp-verify'
+type Mode = 'login' | 'register' | 'forgot' | 'forgot-reset' | 'otp-verify' | 'registered'
 
 export default function AuthPage() {
   const [mode, setMode]            = useState<Mode>('login')
@@ -26,7 +26,6 @@ export default function AuthPage() {
   const [showPw, setShowPw]        = useState(false)
   const [otp, setOtp]              = useState('')
   const [demoCode, setDemoCode]    = useState('')
-  const [emailSent, setEmailSent]  = useState(false)
   const [newPassword, setNewPw]    = useState('')
   const [showNewPw, setShowNewPw]  = useState(false)
   const [pendingEmail, setPending] = useState('')
@@ -36,7 +35,7 @@ export default function AuthPage() {
   const { isDark } = useTheme()
   const nav = useNavigate()
 
-  const resetState = (m: Mode) => { setMode(m); setError(''); setOtp(''); setDemoCode(''); setEmailSent(false) }
+  const resetState = (m: Mode) => { setMode(m); setError(''); setOtp(''); setDemoCode('') }
   const switchTab  = (t: 'login' | 'register') => { setTab(t); resetState(t); setName(''); setEmail(''); setPassword('') }
 
   /* ─── Login: direct email + password ─ no OTP on every login ─── */
@@ -66,8 +65,12 @@ export default function AuthPage() {
     try {
       const res = await register(name, email, password)
       if (!res.ok) return setError(res.error ?? 'Something went wrong')
-      if (res.pending) {
-        // Email verification OTP was sent — show OTP screen
+      if (res.auto_login) {
+        // Registered + auto-logged in — show demo code then redirect
+        setDemoCode(res.demo_code || '')
+        setMode('registered')
+        setTimeout(() => nav(res.user?.role === 'admin' ? '/admin' : '/'), 3200)
+      } else if (res.pending) {
         setDemoCode(res.demo_code || '')
         setPending(res.email || email)
         setOtp('')
@@ -119,7 +122,6 @@ export default function AuthPage() {
       const data = await r.json()
       if (!r.ok) return setError(data.error || 'Something went wrong')
       setDemoCode(data.demo_code || '')
-      setEmailSent(!!data.email_sent)
       setPending(email); setOtp(''); setNewPw('')
       setMode('forgot-reset')
     } finally { setLoading(false) }
@@ -152,16 +154,15 @@ export default function AuthPage() {
   )
 
   const DemoCodeBox = ({ code }: { code: string }) => code ? (
-    <div className="mb-4 px-4 py-3 bg-amber-950/50 border border-amber-500/30 rounded-xl">
-      <p className="text-amber-300 text-xs font-medium mb-1">📧 Demo mode — code that would be emailed:</p>
-      <p className="text-amber-200 font-mono text-2xl font-black tracking-[0.4em] text-center py-1">{code}</p>
-    </div>
-  ) : null
-
-  const EmailSentBox = () => emailSent ? (
-    <div className="mb-4 px-4 py-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center gap-2">
-      <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
-      <p className="text-emerald-300 text-sm">Verification code sent to <strong>{pendingEmail}</strong></p>
+    <div className="mb-4 rounded-xl overflow-hidden border border-indigo-500/40">
+      <div className="bg-indigo-900/60 px-4 py-2 flex items-center gap-2">
+        <span className="text-base">📋</span>
+        <p className="text-indigo-300 text-xs font-semibold uppercase tracking-wide">Demo Mode — Verification Code</p>
+      </div>
+      <div className="bg-slate-900/80 px-4 py-4 text-center">
+        <p className="text-indigo-200 font-mono text-3xl font-black tracking-[0.5em] select-all">{code}</p>
+        <p className="text-slate-500 text-xs mt-2">Copy and paste this code into the field below</p>
+      </div>
     </div>
   ) : null
 
@@ -309,6 +310,35 @@ export default function AuthPage() {
               </motion.div>
             )}
 
+            {/* ═══ REGISTERED — auto-login success screen ═══ */}
+            {mode === 'registered' && (
+              <motion.div key="registered" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}>
+                <div className="text-center mb-6">
+                  <div className="w-16 h-16 rounded-2xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
+                    <CheckCircle className="w-8 h-8 text-emerald-400" />
+                  </div>
+                  <h2 className="text-white font-bold text-xl">Account Created!</h2>
+                  <p className="text-slate-400 text-sm mt-1.5">Welcome aboard. Here's your demo session code:</p>
+                </div>
+                {demoCode && (
+                  <div className="mb-5 rounded-xl overflow-hidden border border-indigo-500/40">
+                    <div className="bg-indigo-900/60 px-4 py-2 flex items-center gap-2">
+                      <span className="text-base">📋</span>
+                      <p className="text-indigo-300 text-xs font-semibold uppercase tracking-wide">Demo Mode — Session Code</p>
+                    </div>
+                    <div className="bg-slate-900/80 px-4 py-4 text-center">
+                      <p className="text-indigo-200 font-mono text-3xl font-black tracking-[0.5em] select-all">{demoCode}</p>
+                      <p className="text-slate-500 text-xs mt-2">In a real deployment this would be emailed to you</p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center justify-center gap-2 text-emerald-400 text-sm font-medium">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Logging you in automatically…</span>
+                </div>
+              </motion.div>
+            )}
+
             {/* ═══ OTP VERIFY (email verification after registration) ═══ */}
             {mode === 'otp-verify' && (
               <motion.div key="otp-verify" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
@@ -323,10 +353,7 @@ export default function AuthPage() {
                   </p>
                   <p className="text-slate-500 text-xs mt-2">You only need to do this once.</p>
                 </div>
-                <div className="mb-4 px-4 py-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <p className="text-emerald-300 text-sm">Verification code sent to <strong>{pendingEmail}</strong></p>
-                </div>
+                <DemoCodeBox code={demoCode} />
                 <form onSubmit={submitOtp} className="space-y-4">
                   <div>
                     <label className="block text-slate-400 text-xs font-medium mb-1.5">6-Digit Verification Code</label>
@@ -389,10 +416,7 @@ export default function AuthPage() {
                   <h2 className="text-white font-bold text-xl">Set New Password</h2>
                   <p className="text-slate-400 text-sm mt-1">Code sent to <span className="text-brand-400">{pendingEmail}</span></p>
                 </div>
-                <div className="mb-4 px-4 py-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <p className="text-emerald-300 text-sm">Reset code sent to <strong>{pendingEmail}</strong></p>
-                </div>
+                <DemoCodeBox code={demoCode} />
                 <form onSubmit={submitReset} className="space-y-4">
                   <div>
                     <label className="block text-slate-400 text-xs font-medium mb-1.5">6-Digit Verification Code</label>

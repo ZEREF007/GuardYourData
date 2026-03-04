@@ -35,6 +35,9 @@ training.db-wal
 __pycache__/
 *.pyc
 
+# Assignment brief (local only)
+extra/
+
 # Logs
 *.log
 npm-debug.log*

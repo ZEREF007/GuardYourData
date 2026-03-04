@@ -12,7 +12,7 @@ interface AuthContextType {
   token: string | null
   loading: boolean
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string; pending?: boolean; demo_code?: string; email?: string }>
-  register: (name: string, email: string, password: string) => Promise<{ ok: boolean; pending?: boolean; demo_code?: string; email?: string; error?: string }>
+  register: (name: string, email: string, password: string) => Promise<{ ok: boolean; pending?: boolean; auto_login?: boolean; demo_code?: string; email?: string; user?: { id: number; name: string; email: string; role: 'learner' | 'admin' }; error?: string }>
   logout: () => void
   completeLogin: (token: string, user: User) => void
 }
@@ -62,14 +62,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
     const data = await res.json()
     if (!res.ok) return { ok: false, error: data.error || 'Registration failed' }
-    // pending = true means email verification OTP was sent
-    if (data.pending) return { ok: true, pending: true, demo_code: data.demo_code, email: data.email }
-    // legacy: immediate login (shouldn't happen with new server)
+    // Auto-login: server verified immediately and issued a token
     if (data.token) {
       setToken(data.token); setUser(data.user)
       localStorage.setItem('token', data.token)
       localStorage.setItem('user', JSON.stringify(data.user))
+      return { ok: true, auto_login: true, demo_code: data.demo_code, user: data.user }
     }
+    // pending = true means email verification OTP was sent (legacy path)
+    if (data.pending) return { ok: true, pending: true, demo_code: data.demo_code, email: data.email }
     return { ok: true }
   }
 

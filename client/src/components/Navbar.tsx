@@ -24,6 +24,7 @@ const RESOURCE_ITEMS = [
   { path: '/laws',       label: 'Laws & Regs',  icon: '⚖️', desc: 'GDPR, PDPO, PCI DSS & more', live: false },
   { path: '/live',       label: 'Live Threats', icon: '🔴', desc: 'CISA KEV feed — real time',    live: true  },
   { path: '/references', label: 'References',   icon: '📑', desc: 'Academic & industry sources', live: false },
+  { path: '/feedback',   label: 'Feedback',     icon: '💬', desc: 'Share your thoughts with us',  live: false },
 ]
 
 type DropdownId = 'modules' | 'practice' | 'resources' | null
@@ -84,19 +85,21 @@ export default function Navbar() {
             : 'bg-white/92 dark:bg-slate-900/80 backdrop-blur-sm border-b border-slate-200/60 dark:border-slate-800/50',
         )}
       >
-        <div className="max-w-screen-xl mx-auto px-4 h-14 flex items-center gap-2">
-          {/* Brand */}
-          <Link to="/" className="flex items-center gap-2.5 shrink-0 group mr-2">
-            <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center group-hover:bg-brand-500 transition-colors">
-              <Shield className="w-4 h-4 text-white" />
-            </div>
-            <div className="hidden sm:block">
-              <div className="text-sm font-extrabold text-slate-900 dark:text-white leading-none tracking-tight">Guard<span className="text-brand-600 dark:text-brand-400">YourData</span></div>
-            </div>
-          </Link>
+        <div className="max-w-screen-xl mx-auto px-4 h-14 flex items-center">
+          {/* Brand — left column, flex-1 so it mirrors right side */}
+          <div className="flex-1 flex items-center">
+            <Link to="/" className="flex items-center gap-2.5 group">
+              <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center group-hover:bg-brand-500 transition-colors">
+                <Shield className="w-4 h-4 text-white" />
+              </div>
+              <div className="hidden sm:block">
+                <div className="text-sm font-extrabold text-slate-900 dark:text-white leading-none tracking-tight">Guard<span className="text-brand-600 dark:text-brand-400">YourData</span></div>
+              </div>
+            </Link>
+          </div>
 
-          {/* Desktop nav */}
-          <ul className="hidden lg:flex items-center gap-0.5 flex-1" ref={navRef}>
+          {/* Desktop nav — true centre */}
+          <ul className="hidden lg:flex items-center gap-3" ref={navRef}>
 
             {/* Home */}
             <li>
@@ -246,8 +249,8 @@ export default function Navbar() {
 
           </ul>
 
-          {/* Right actions */}
-          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+          {/* Right actions — flex-1 justify-end mirrors left brand column */}
+          <div className="flex-1 flex items-center justify-end gap-1.5">
             {user ? (
               <>
                 {user.role === 'admin' && (
