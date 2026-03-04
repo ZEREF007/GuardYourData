@@ -28,6 +28,10 @@ training.db-wal
 
 # Python
 .venv/
+
+# Local working docs
+*.md
+!README.md
 __pycache__/
 *.pyc
 

@@ -171,6 +171,26 @@ export default function ThankYouPage() {
         {/* Quick Tips */}
         <QuickTips tips={THANKYOU_TIPS} title="Your Next Steps After Completing This Course" />
 
+        {/* Personal Video Message */}
+        <motion.div variants={itemVariants} className="mt-10 mb-2">
+          <h2 className="text-center text-slate-500 dark:text-slate-400 text-sm font-semibold uppercase tracking-widest mb-4">A Personal Message</h2>
+          <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700/50 bg-slate-100 dark:bg-slate-900/60">
+            {/* ── REPLACE the block below with your <iframe> or <video> embed ── */}
+            <div
+              className="flex flex-col items-center justify-center gap-3 py-14 px-8 text-center"
+              style={{ aspectRatio: '16/9' }}
+            >
+              <div className="text-5xl">🎥</div>
+              <p className="text-slate-900 dark:text-white font-bold text-lg">Personal Thank-You Video</p>
+              <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm">
+                A short personal message from the course creator — thank you for completing <strong>GuardYourData</strong>.
+              </p>
+              <p className="text-xs text-slate-400 dark:text-slate-600 italic mt-1">Video coming soon</p>
+            </div>
+            {/* ── END replace block ── */}
+          </div>
+        </motion.div>
+
         {/* Professor Thank You */}
         <motion.div
           variants={itemVariants}

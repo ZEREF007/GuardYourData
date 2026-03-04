@@ -144,7 +144,12 @@ export default function AuthPage() {
   const npStrength = newPassword? checks.filter(c => c.test(newPassword)).length : 0
   const strengthLabel = ['', 'Weak', 'Fair', 'Good', 'Strong'][pwStrength] ?? ''
   const strengthColor = ['', 'bg-red-500', 'bg-amber-500', 'bg-blue-500', 'bg-emerald-500']
-  const inputCls = 'w-full bg-slate-800/60 border border-slate-700/50 rounded-xl px-4 py-3 text-white placeholder:text-slate-500 text-sm focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30 transition-all'
+  const inputCls = clsx(
+    'w-full rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand-500/60 focus:ring-1 focus:ring-brand-500/30 transition-all border',
+    isDark
+      ? 'bg-slate-800/60 border-slate-700/50 text-white placeholder:text-slate-500'
+      : 'bg-white border-slate-300 text-slate-900 placeholder:text-slate-400'
+  )
 
   const DemoCodeBox = ({ code }: { code: string }) => code ? (
     <div className="mb-4 px-4 py-3 bg-amber-950/50 border border-amber-500/30 rounded-xl">
@@ -200,12 +205,6 @@ export default function AuthPage() {
                       {t === 'login' ? '🔑 Sign In' : '🆕 Register'}
                     </button>
                   ))}
-                </div>
-
-                {/* Security notice */}
-                <div className="flex items-center gap-2 px-3 py-2 bg-brand-950/40 border border-brand-700/30 rounded-xl mb-5">
-                  <ShieldCheck className="w-4 h-4 text-brand-400 shrink-0" />
-                  <span className="text-brand-300 text-xs font-medium">Secure login — no code required after email verification</span>
                 </div>
 
                 <form onSubmit={submitLogin} className="space-y-4">
