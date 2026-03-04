@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   RadialBarChart, RadialBar, Cell,
 } from 'recharts'
-import { Trophy, Zap, BookOpen, Target, TrendingUp, Calendar, LogIn, ChevronRight } from 'lucide-react'
+import { Trophy, Zap, Target, TrendingUp, Calendar, LogIn, ChevronRight } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import clsx from 'clsx'
 import QuickTips from '../components/QuickTips'
@@ -244,9 +244,8 @@ export default function DashboardPage() {
 
       <div className="max-w-6xl mx-auto px-6 py-10 space-y-10">
         {/* KPI cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { icon: BookOpen, label: 'Pages Visited', value: pagesVisited, sub: `of ${ALL_PAGES.length} pages`, color: 'text-blue-400' },
             { icon: Target, label: 'Modules Done', value: `${modulesCompleted}/5`, sub: `${Math.round(moduleProgress)}% complete`, color: 'text-indigo-400' },
             { icon: Trophy, label: 'Best Quiz Score', value: bestQuiz ? `${bestQuiz}%` : '—', sub: gradeLabel, color: gradeColor },
             { icon: Zap, label: 'Best Game Score', value: bestGame || '—', sub: `${gameAttempts} attempt${gameAttempts !== 1 ? 's' : ''}`, color: 'text-amber-400' },
@@ -338,28 +337,6 @@ export default function DashboardPage() {
                 </BarChart>
               </ResponsiveContainer>
             )}
-          </div>
-        </div>
-
-        {/* Pages visited */}
-        <div className="card">
-          <h2 className="text-white font-bold mb-4">Pages Visited</h2>
-          <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-3">
-            {ALL_PAGES.map(p => {
-              const done = visitedPages.has(p.page)
-              return (
-                <Link key={p.page} to={p.page} className={clsx(
-                  'flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all hover:-translate-y-1',
-                  done
-                    ? 'bg-brand-600/20 border-brand-500/40 text-brand-300'
-                    : 'bg-slate-800/40 border-slate-700/50 text-slate-500 hover:text-slate-300',
-                )}>
-                  <span className="text-xl">{p.emoji}</span>
-                  <span className="text-[11px] font-medium">{p.label}</span>
-                  {done && <span className="text-[10px] text-emerald-400">✓</span>}
-                </Link>
-              )
-            })}
           </div>
         </div>
 
