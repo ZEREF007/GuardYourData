@@ -3,6 +3,17 @@
  * Express + better-sqlite3 + bcryptjs + JWT
  * Run: node server.js (then open http://localhost:3000)
  */
+// Load .env file manually (no dotenv package required)
+try {
+  const fs = require('fs'), path0 = require('path');
+  const envPath = path0.join(__dirname, '.env');
+  if (fs.existsSync(envPath)) {
+    fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
+      const m = line.match(/^\s*([\w]+)\s*=\s*(.*)\s*$/);
+      if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+    });
+  }
+} catch (_) {}
 
 const express  = require('express');
 const path     = require('path');
