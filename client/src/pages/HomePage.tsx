@@ -4,6 +4,7 @@ import { Shield, BookOpen, Target, Award, Clock, ChevronRight, Play, CheckCircle
 import { MODULES } from '../data/modules'
 import clsx from 'clsx'
 import QuickTips from '../components/QuickTips'
+import CountUp from '../components/CountUp'
 
 const STATS = [
   { value: 'US$4.45M', label: 'Average cost of one data breach (IBM 2024)', icon: '💸' },
@@ -162,7 +163,9 @@ export default function HomePage() {
         {STATS.map((s, i) => (
           <motion.div key={i} variants={fadeUp} className="stat-card">
             <div className="text-2xl mb-2">{s.icon}</div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white mb-1">{s.value}</div>
+            <div className="text-2xl font-black text-slate-900 dark:text-white mb-1">
+              <CountUp value={s.value} duration={3000} />
+            </div>
             <div className="text-slate-500 dark:text-slate-400 text-xs leading-tight">{s.label}</div>
           </motion.div>
         ))}
