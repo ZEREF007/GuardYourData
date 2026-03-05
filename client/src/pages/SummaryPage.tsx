@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion'
 import { Download, FileText, ChevronRight, TrendingUp, Shield, AlertTriangle, BookOpen, Gavel, Layers } from 'lucide-react'
 
+const PPTX_FILE = '/pptx/The_FinTech_Security_Imperative.pptx'
+
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
   visible: (i: number) => ({
@@ -96,6 +98,12 @@ const FINDINGS = [
 ]
 
 export default function SummaryPage() {
+  const viewerUrl = `https://docs.google.com/gviewer?url=${encodeURIComponent(
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${PPTX_FILE}`
+      : `https://fin7900-training.onrender.com${PPTX_FILE}`
+  )}&embedded=true`
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-12">
 
@@ -132,7 +140,7 @@ export default function SummaryPage() {
         <div className="h-px bg-slate-200 dark:bg-slate-700/60 mt-8" />
       </motion.div>
 
-      {/* ── PPTX Download ──────────────────────────────── */}
+      {/* ── PPTX Viewer + Download ─────────────────────── */}
       <motion.section
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -144,28 +152,30 @@ export default function SummaryPage() {
           <h2 className="text-xs font-bold tracking-[0.18em] uppercase text-slate-500 dark:text-slate-400">Slide Deck</h2>
         </div>
 
-        <div className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-800/60 p-8">
-          {/* Background decoration */}
+        {/* Embedded viewer */}
+        <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700/60 shadow-xl dark:shadow-black/30 mb-4 bg-slate-100 dark:bg-slate-900">
+          <iframe
+            src={viewerUrl}
+            className="w-full"
+            style={{ height: '560px', border: 'none' }}
+            title="The FinTech Security Imperative — Slide Deck"
+            allow="fullscreen"
+          />
+        </div>
+
+        {/* Info + download bar */}
+        <div className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700/60 bg-gradient-to-br from-slate-50 to-white dark:from-slate-900 dark:to-slate-800/60 p-6">
           <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/5 dark:bg-brand-500/10 rounded-full -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-          <div className="absolute bottom-0 left-0 w-40 h-40 bg-accent-500/5 dark:bg-accent-500/10 rounded-full translate-y-1/2 -translate-x-1/4 pointer-events-none" />
-
-          <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-6">
-            {/* Icon */}
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-600 to-accent-600 flex items-center justify-center shrink-0 shadow-lg shadow-brand-600/20">
-              <FileText className="w-7 h-7 text-white" />
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-brand-600 to-accent-600 flex items-center justify-center shrink-0 shadow-lg shadow-brand-600/20">
+              <FileText className="w-5 h-5 text-white" />
             </div>
-
-            {/* Info */}
             <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold tracking-widest uppercase text-brand-600 dark:text-brand-400 mb-1">Full Programme Presentation</p>
-              <h3 className="text-lg font-black text-slate-900 dark:text-white leading-tight mb-1">
+              <p className="text-[10px] font-bold tracking-widest uppercase text-brand-600 dark:text-brand-400 mb-0.5">Full Programme Presentation</p>
+              <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight mb-1">
                 The FinTech Security Imperative
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Complete slide deck covering all 5 modules · PowerPoint (.pptx)
-              </p>
-
-              <div className="flex flex-wrap gap-2 mt-3">
+              <div className="flex flex-wrap gap-2 mt-2">
                 {['Module 1–5', 'PDPO · GDPR · HKMA', 'Case Studies', 'Deloitte-style'].map(tag => (
                   <span key={tag} className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400 text-[10px] font-semibold">
                     {tag}
@@ -173,12 +183,10 @@ export default function SummaryPage() {
                 ))}
               </div>
             </div>
-
-            {/* Download button */}
             <a
-              href="/pptx/The_FinTech_Security_Imperative.pptx"
+              href={PPTX_FILE}
               download
-              className="flex items-center gap-2 px-5 py-3 bg-brand-600 hover:bg-brand-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-brand-600/25 hover:shadow-brand-500/30 hover:-translate-y-0.5 shrink-0"
+              className="flex items-center gap-2 px-5 py-3 bg-brand-600 hover:bg-brand-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-brand-600/25 hover:-translate-y-0.5 shrink-0"
             >
               <Download className="w-4 h-4" />
               Download PPTX
