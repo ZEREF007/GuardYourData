@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { Download, FileText, ChevronRight, TrendingUp, Shield, AlertTriangle, BookOpen, Gavel, Layers } from 'lucide-react'
 
-const PPTX_FILE = '/pptx/The_FinTech_Security_Imperative.pptx'
+const PDF_FILE  = '/pptx/The_FinTech_Security_Imperative.pdf'
 
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
@@ -98,11 +98,7 @@ const FINDINGS = [
 ]
 
 export default function SummaryPage() {
-  const viewerUrl = `https://docs.google.com/gviewer?url=${encodeURIComponent(
-    typeof window !== 'undefined'
-      ? `${window.location.origin}${PPTX_FILE}`
-      : `https://fin7900-training.onrender.com${PPTX_FILE}`
-  )}&embedded=true`
+  const viewerUrl = `/pdf-viewer.html?file=${encodeURIComponent(PDF_FILE)}`
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-12">
@@ -149,11 +145,11 @@ export default function SummaryPage() {
       >
         <div className="flex items-center gap-2 mb-5">
           <div className="h-0.5 w-6 bg-brand-600" />
-          <h2 className="text-xs font-bold tracking-[0.18em] uppercase text-slate-500 dark:text-slate-400">Slide Deck</h2>
+          <h2 className="text-xs font-bold tracking-[0.18em] uppercase text-slate-500 dark:text-slate-400">Slide Deck — Use ← → arrows to navigate</h2>
         </div>
 
-        {/* Embedded viewer */}
-        <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700/60 shadow-xl dark:shadow-black/30 mb-4 bg-slate-100 dark:bg-slate-900">
+        {/* Embedded PDF slide viewer */}
+        <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700/60 shadow-xl dark:shadow-black/30 mb-4 bg-[#0f172a]">
           <iframe
             src={viewerUrl}
             className="w-full"
@@ -184,12 +180,12 @@ export default function SummaryPage() {
               </div>
             </div>
             <a
-              href={PPTX_FILE}
+              href={PDF_FILE}
               download
               className="flex items-center gap-2 px-5 py-3 bg-brand-600 hover:bg-brand-500 text-white text-sm font-bold rounded-xl transition-all shadow-lg shadow-brand-600/25 hover:-translate-y-0.5 shrink-0"
             >
               <Download className="w-4 h-4" />
-              Download PPTX
+              Download PDF
             </a>
           </div>
         </div>
