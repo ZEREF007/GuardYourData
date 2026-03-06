@@ -1,5 +1,8 @@
 import { motion } from 'framer-motion'
-import { ExternalLink, Heart, Shield, BookOpen, Target, Linkedin } from 'lucide-react'
+import { ExternalLink, Heart, Shield, BookOpen, Target, Linkedin, Download, FileText } from 'lucide-react'
+
+const RESUME_VIEW_URL     = 'https://lifehkbueduhk-my.sharepoint.com/:b:/g/personal/25449745_life_hkbu_edu_hk/IQBgRkmLJ7qFQqLhFLuO4UqqAf1amA5rxjIBS3Qkoz1eRTE?e=XJD2eE&action=embedview'
+const RESUME_DOWNLOAD_URL = 'https://lifehkbueduhk-my.sharepoint.com/:b:/g/personal/25449745_life_hkbu_edu_hk/IQBgRkmLJ7qFQqLhFLuO4UqqAf1amA5rxjIBS3Qkoz1eRTE?e=XJD2eE&download=1'
 
 const fadeUp = {
   hidden: { opacity: 0, y: 24 },
@@ -109,9 +112,86 @@ export default function AboutPage() {
           </div>
         </motion.div>
 
-        {/* About the project */}
+        {/* About me — LinkedIn bio */}
         <motion.div
           custom={1}
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true }}
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-[#0A66C2]/10 dark:bg-[#0A66C2]/20 flex items-center justify-center">
+              <Linkedin className="w-5 h-5 text-[#0A66C2]" />
+            </div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">About Me</h2>
+          </div>
+          <div className="card space-y-4">
+            <p className="text-slate-700 dark:text-slate-300 leading-relaxed text-lg">
+              I'm a finance and technology student with a deep passion for the intersection
+              of FinTech, cybersecurity, and product development. I believe that technology
+              should empower people — not overwhelm them — and that real security education
+              should be accessible, engaging, and practical.
+            </p>
+            <p className="text-slate-700 dark:text-slate-300 leading-relaxed text-lg">
+              Beyond academics, I enjoy building things from scratch: this platform is a
+              testament to that curiosity — from designing the UI to writing the backend
+              APIs and deploying to the cloud. I'm always looking for opportunities to
+              bridge the gap between complex technical concepts and real-world business
+              impact.
+            </p>
+            <a
+              href="https://www.linkedin.com/in/acebhatt"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-[#0A66C2] hover:underline font-semibold text-base"
+            >
+              <Linkedin className="w-4 h-4" />
+              View full profile on LinkedIn
+              <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+            </a>
+          </div>
+        </motion.div>
+
+        {/* Resume */}
+        <motion.div
+          custom={2}
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true }}
+        >
+          <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">My Résumé</h2>
+            </div>
+            <a
+              href={RESUME_DOWNLOAD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-white font-semibold rounded-xl transition-all duration-200 hover:shadow-lg hover:shadow-amber-500/30 text-sm"
+            >
+              <Download className="w-4 h-4" />
+              Download PDF
+            </a>
+          </div>
+          {/* Embedded preview */}
+          <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700/60 shadow-md bg-white dark:bg-slate-800" style={{ height: '780px' }}>
+            <iframe
+              src={RESUME_VIEW_URL}
+              title="Ace Bhatt — Résumé"
+              className="w-full h-full"
+              allow="autoplay"
+            />
+          </div>
+        </motion.div>
+
+        {/* About the project */}
+        <motion.div
+          custom={3}
           variants={fadeUp}
           initial="hidden"
           whileInView="visible"
@@ -139,7 +219,7 @@ export default function AboutPage() {
 
         {/* What I built grid */}
         <motion.div
-          custom={2}
+          custom={4}
           variants={fadeUp}
           initial="hidden"
           whileInView="visible"
@@ -172,7 +252,7 @@ export default function AboutPage() {
 
         {/* Tech stack */}
         <motion.div
-          custom={3}
+          custom={5}
           variants={fadeUp}
           initial="hidden"
           whileInView="visible"
@@ -202,7 +282,7 @@ export default function AboutPage() {
 
         {/* Connect */}
         <motion.div
-          custom={4}
+          custom={6}
           variants={fadeUp}
           initial="hidden"
           whileInView="visible"
@@ -232,7 +312,7 @@ export default function AboutPage() {
 
         {/* Footer note */}
         <motion.div
-          custom={5}
+          custom={7}
           variants={fadeUp}
           initial="hidden"
           whileInView="visible"
