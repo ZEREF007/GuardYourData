@@ -1,6 +1,6 @@
 /**
  * FIN7900 Training Platform — Backend Server
- * Express + better-sqlite3 + bcryptjs + JWT
+ * Express + MySQL (mysql2) + bcryptjs + JWT
  * Run: node server.js (then open http://localhost:3000)
  */
 // Load .env file manually (no dotenv package required)
@@ -23,189 +23,191 @@ const jwt      = require('jsonwebtoken');
 const cors     = require('cors');
 const https    = require('https');
 const XLSX     = require('xlsx');
+const mysql    = require('mysql2/promise');
 
-// ─── Load SQLite (graceful failure so Express still starts) ──
-let Database;
-let DB_LOAD_ERROR = null;
-try {
-  Database = require('node-sqlite3-wasm').Database;
-} catch (e) {
-  DB_LOAD_ERROR = e.message;
-  const logPath = path.join(__dirname, 'startup-error.log');
-  fs.appendFileSync(logPath, `[${new Date().toISOString()}] DB load failed: ${e.message}\n${e.stack}\n`);
-  console.error('❌  DB load failed:', e.message);
-}
-
-// ─── Config ────────────────────────────────────────────────
+// ─── Config ────────────────────────────────────────────
 const PORT       = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fin7900-super-secret-key-change-in-prod';
 const JWT_EXPIRY = '7d';
-const DB_PATH    = path.join(__dirname, 'training.db');
 
-// ─── Database Setup ─────────────────────────────────────────
-let db = null;
-if (Database) {
+// ─── MySQL Connection Pool ──────────────────────────────────────
+let pool = null;
+let DB_LOAD_ERROR = null;
+
+async function initDb() {
   try {
-    db = new Database(DB_PATH);
-    db.exec("PRAGMA journal_mode = WAL");
-    db.exec("PRAGMA foreign_keys = ON");
+    pool = mysql.createPool({
+      host:               process.env.DB_HOST     || 'localhost',
+      user:               process.env.DB_USER     || 'root',
+      password:           process.env.DB_PASS     || '',
+      database:           process.env.DB_NAME     || 'fin7900',
+      port:               parseInt(process.env.DB_PORT || '3306'),
+      waitForConnections: true,
+      connectionLimit:    10,
+      charset:            'utf8mb4',
+    });
+    await pool.execute('SELECT 1'); // test connection
+    console.log('  \u2705  MySQL connected to', process.env.DB_HOST || 'localhost');
 
-    db.exec(`CREATE TABLE IF NOT EXISTS users (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      name           TEXT    NOT NULL,
-      email          TEXT    NOT NULL UNIQUE,
-      password       TEXT    NOT NULL,
-      role           TEXT    NOT NULL DEFAULT 'learner',
-      email_verified INTEGER NOT NULL DEFAULT 1,
-      last_ip        TEXT    NOT NULL DEFAULT '',
-      created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
-    )`);
-    db.exec(`CREATE TABLE IF NOT EXISTS page_visits (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      page         TEXT    NOT NULL,
-      visited_at   TEXT    NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(user_id, page)
-    )`);
-    db.exec(`CREATE TABLE IF NOT EXISTS quiz_attempts (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      score        INTEGER NOT NULL,
-      total        INTEGER NOT NULL,
-      pct          INTEGER NOT NULL,
-      passed       INTEGER NOT NULL DEFAULT 0,
-      elapsed_sec  INTEGER NOT NULL DEFAULT 0,
-      filter       TEXT    NOT NULL DEFAULT 'all',
-      taken_at     TEXT    NOT NULL DEFAULT (datetime('now'))
-    )`);
-    db.exec(`CREATE TABLE IF NOT EXISTS game_attempts (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      score        INTEGER NOT NULL,
-      correct      INTEGER NOT NULL,
-      total        INTEGER NOT NULL,
-      max_streak   INTEGER NOT NULL DEFAULT 0,
-      rank         TEXT    NOT NULL DEFAULT '',
-      played_at    TEXT    NOT NULL DEFAULT (datetime('now'))
-    )`);
-    db.exec(`CREATE TABLE IF NOT EXISTS module_videos (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      module_id  TEXT    NOT NULL UNIQUE,
-      url        TEXT    NOT NULL DEFAULT '',
-      updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    )`);
-    db.exec(`CREATE TABLE IF NOT EXISTS otp_tokens (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      email      TEXT    NOT NULL,
-      code_hash  TEXT    NOT NULL,
-      purpose    TEXT    NOT NULL DEFAULT 'login',
-      expires_at TEXT    NOT NULL,
-      used       INTEGER NOT NULL DEFAULT 0
-    )`);
-    db.exec(`CREATE TABLE IF NOT EXISTS module_completions (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      module_id    TEXT    NOT NULL,
-      mcq_score    INTEGER,
-      mcq_total    INTEGER,
-      completed_at TEXT    NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(user_id, module_id)
-    )`);
-    db.exec(`CREATE TABLE IF NOT EXISTS feedback (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      name         TEXT    NOT NULL,
-      email        TEXT    NOT NULL,
-      age_group    TEXT    NOT NULL,
-      industry     TEXT    NOT NULL,
-      remarks      TEXT    NOT NULL DEFAULT '',
-      submitted_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    )`);
+    await pool.execute(`CREATE TABLE IF NOT EXISTS users (
+      id             INT AUTO_INCREMENT PRIMARY KEY,
+      name           VARCHAR(255) NOT NULL,
+      email          VARCHAR(255) NOT NULL UNIQUE,
+      password       TEXT NOT NULL,
+      role           VARCHAR(50)  NOT NULL DEFAULT 'learner',
+      email_verified TINYINT(1)   NOT NULL DEFAULT 1,
+      last_ip        VARCHAR(100) NOT NULL DEFAULT '',
+      created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
-// Safe migrations for older DBs that may not have these columns
-try { db.exec("ALTER TABLE users ADD COLUMN last_ip TEXT DEFAULT ''"); } catch (_) {}
-try { db.exec("ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 1"); } catch (_) {}
+    await pool.execute(`CREATE TABLE IF NOT EXISTS page_visits (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      user_id    INT          NOT NULL,
+      page       VARCHAR(255) NOT NULL,
+      visited_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_user_page (user_id, page),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
-// ─── Startup: ensure admin email is always admin ─────────────
-try {
-  const ADMIN_EMAIL = 'icyace007@gmail.com';
-  const user = db.prepare('SELECT id, role FROM users WHERE email = ?').get(ADMIN_EMAIL);
-  if (user && user.role !== 'admin') {
-    db.prepare("UPDATE users SET role = 'admin' WHERE email = ?").run(ADMIN_EMAIL);
-    console.log(`  ✅  Promoted ${ADMIN_EMAIL} to admin`);
-  }
-} catch (e) { console.warn('  ⚠️  ensureAdminEmail skipped:', e.message); }
+    await pool.execute(`CREATE TABLE IF NOT EXISTS quiz_attempts (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      user_id     INT         NOT NULL,
+      score       INT         NOT NULL,
+      total       INT         NOT NULL,
+      pct         INT         NOT NULL,
+      passed      TINYINT(1)  NOT NULL DEFAULT 0,
+      elapsed_sec INT         NOT NULL DEFAULT 0,
+      filter      VARCHAR(50) NOT NULL DEFAULT 'all',
+      taken_at    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
-// ─── Startup: ensure superuser ace0404@admin.com exists ────────
-try {
-  const SU_EMAIL = 'ace0404@admin.com';
-  const existing = db.prepare('SELECT id, role FROM users WHERE email = ?').get(SU_EMAIL);
-  if (!existing) {
-    const pw = 'Qwertyuiop!123';
-    const hash = bcrypt.hashSync(pw, 12);
-    db.exec(`INSERT OR IGNORE INTO users (name, email, password, role) VALUES ('Ace Admin','ace0404@admin.com','${hash}','admin')`);
-    console.log('  ✅  Created superuser ace0404@admin.com');
-  } else if (existing.role !== 'admin') {
-    db.exec(`UPDATE users SET role='admin' WHERE email='ace0404@admin.com'`);
-    console.log('  ✅  Promoted ace0404@admin.com to admin');
-  }
-} catch (e) { console.warn('  ⚠️  ensureSuperuser skipped:', e.message); }
+    await pool.execute(`CREATE TABLE IF NOT EXISTS game_attempts (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      user_id    INT         NOT NULL,
+      score      INT         NOT NULL,
+      correct    INT         NOT NULL,
+      total      INT         NOT NULL,
+      max_streak INT         NOT NULL DEFAULT 0,
+      rank       VARCHAR(50) NOT NULL DEFAULT '',
+      played_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
-// ─── Startup: ensure demo learner account exists ──────────────
-try {
-  const DL_EMAIL = 'demo@guardyourdata.com';
-  const dlExisting = db.prepare('SELECT id FROM users WHERE email = ?').get(DL_EMAIL);
-  if (!dlExisting) {
-    const hash = bcrypt.hashSync('Demo1234!', 12);
-    db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run('Demo User', DL_EMAIL, hash, 'learner');
-    console.log('  ✅  Created demo learner demo@guardyourdata.com');
-  }
-} catch (e) { console.warn('  ⚠️  ensureDemoLearner skipped:', e.message); }
+    await pool.execute(`CREATE TABLE IF NOT EXISTS module_videos (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      module_id  VARCHAR(50) NOT NULL UNIQUE,
+      url        TEXT        NOT NULL,
+      updated_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
 
-// ─── Startup: seed module video URLs from local files ────────
-try {
-  const videos = [
-    { module_id: 'overview', url: 'https://www.youtube.com/embed/_NDoHJsOKMY' },
-    { module_id: 'module1',  url: 'https://www.youtube.com/embed/83HMr13zbhc' },
-    { module_id: 'module2',  url: 'https://www.youtube.com/embed/IwDSwe7OtJg' },
-    { module_id: 'module3',  url: 'https://www.youtube.com/embed/s2SfPN3atlY' },
-    { module_id: 'module4',  url: 'https://www.youtube.com/embed/7g9YwY5N1KU' },
-    { module_id: 'module5',  url: 'https://www.youtube.com/embed/QAWKgRVft80' },
-  ];
-  const insert = db.prepare(`
-    INSERT INTO module_videos (module_id, url, updated_at) VALUES (?, ?, datetime('now'))
-    ON CONFLICT(module_id) DO UPDATE SET url = excluded.url, updated_at = excluded.updated_at
-  `);
-  videos.forEach(v => insert.run(v.module_id, v.url));
-  console.log('  ✅  Video URLs seeded (YouTube)');
-} catch (e) { console.warn('  ⚠️  seedVideoUrls skipped:', e.message); }
+    await pool.execute(`CREATE TABLE IF NOT EXISTS otp_tokens (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      email      VARCHAR(255) NOT NULL,
+      code_hash  TEXT         NOT NULL,
+      purpose    VARCHAR(50)  NOT NULL DEFAULT 'login',
+      expires_at DATETIME     NOT NULL,
+      used       TINYINT(1)   NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    await pool.execute(`CREATE TABLE IF NOT EXISTS module_completions (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      user_id      INT         NOT NULL,
+      module_id    VARCHAR(50) NOT NULL,
+      mcq_score    INT,
+      mcq_total    INT,
+      completed_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_user_module (user_id, module_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    await pool.execute(`CREATE TABLE IF NOT EXISTS feedback (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      name         VARCHAR(255) NOT NULL,
+      email        VARCHAR(255) NOT NULL,
+      age_group    VARCHAR(50)  NOT NULL,
+      industry     VARCHAR(100) NOT NULL,
+      remarks      TEXT         NOT NULL,
+      submitted_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`);
+
+    // Safe migrations for older DBs
+    try { await pool.execute("ALTER TABLE users ADD COLUMN last_ip VARCHAR(100) DEFAULT ''"); } catch (_) {}
+    try { await pool.execute("ALTER TABLE users ADD COLUMN email_verified TINYINT(1) DEFAULT 1"); } catch (_) {}
+
+    // Ensure admin email is always admin
+    try {
+      const ADMIN_EMAIL = 'icyace007@gmail.com';
+      const [rows] = await pool.execute('SELECT id, role FROM users WHERE email = ?', [ADMIN_EMAIL]);
+      if (rows.length && rows[0].role !== 'admin') {
+        await pool.execute("UPDATE users SET role = 'admin' WHERE email = ?", [ADMIN_EMAIL]);
+        console.log(`  \u2705  Promoted ${ADMIN_EMAIL} to admin`);
+      }
+    } catch (e) { console.warn('  \u26a0\ufe0f  ensureAdminEmail skipped:', e.message); }
+
+    // Ensure superuser ace0404@admin.com
+    try {
+      const SU_EMAIL = 'ace0404@admin.com';
+      const [rows] = await pool.execute('SELECT id, role FROM users WHERE email = ?', [SU_EMAIL]);
+      if (!rows.length) {
+        const hash = bcrypt.hashSync('ace0404@admin.com', 12);
+        await pool.execute(
+          "INSERT IGNORE INTO users (name, email, password, role, email_verified) VALUES (?, ?, ?, 'admin', 1)",
+          ['Ace Admin', SU_EMAIL, hash]
+        );
+        console.log('  \u2705  Created superuser ace0404@admin.com');
+      } else if (rows[0].role !== 'admin') {
+        await pool.execute("UPDATE users SET role='admin' WHERE email=?", [SU_EMAIL]);
+        console.log('  \u2705  Promoted ace0404@admin.com to admin');
+      }
+    } catch (e) { console.warn('  \u26a0\ufe0f  ensureSuperuser skipped:', e.message); }
+
+    // Ensure demo learner
+    try {
+      const DL_EMAIL = 'demo@guardyourdata.com';
+      const [rows] = await pool.execute('SELECT id FROM users WHERE email = ?', [DL_EMAIL]);
+      if (!rows.length) {
+        const hash = bcrypt.hashSync('Demo1234!', 12);
+        await pool.execute(
+          'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+          ['Demo User', DL_EMAIL, hash, 'learner']
+        );
+        console.log('  \u2705  Created demo learner demo@guardyourdata.com');
+      }
+    } catch (e) { console.warn('  \u26a0\ufe0f  ensureDemoLearner skipped:', e.message); }
+
+    // Seed video URLs
+    try {
+      const videos = [
+        { module_id: 'overview', url: 'https://www.youtube.com/embed/_NDoHJsOKMY' },
+        { module_id: 'module1',  url: 'https://www.youtube.com/embed/83HMr13zbhc' },
+        { module_id: 'module2',  url: 'https://www.youtube.com/embed/IwDSwe7OtJg' },
+        { module_id: 'module3',  url: 'https://www.youtube.com/embed/s2SfPN3atlY' },
+        { module_id: 'module4',  url: 'https://www.youtube.com/embed/7g9YwY5N1KU' },
+        { module_id: 'module5',  url: 'https://www.youtube.com/embed/QAWKgRVft80' },
+      ];
+      for (const v of videos) {
+        await pool.execute(
+          'INSERT INTO module_videos (module_id, url) VALUES (?, ?) ON DUPLICATE KEY UPDATE url = VALUES(url), updated_at = NOW()',
+          [v.module_id, v.url]
+        );
+      }
+      console.log('  \u2705  Video URLs seeded (YouTube)');
+    } catch (e) { console.warn('  \u26a0\ufe0f  seedVideoUrls skipped:', e.message); }
 
   } catch (e) {
-    DB_LOAD_ERROR = DB_LOAD_ERROR || e.message;
+    DB_LOAD_ERROR = e.message;
     const logPath = path.join(__dirname, 'startup-error.log');
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] DB init failed: ${e.message}\n${e.stack}\n`);
-    console.error('❌  DB init failed:', e.message);
-    db = null;
+    console.error('\u274c  DB init failed:', e.message);
+    pool = null;
   }
 }
 
-// ─── Express Setup ───────────────────────────────────────────
+// ─── Express Setup ────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// ─── If DB failed, serve a diagnostic error page ─────────────
-if (DB_LOAD_ERROR) {
-  app.get('*', (req, res) => {
-    res.status(500).send(`<!doctype html><html><head><title>Server Error</title></head><body style="font-family:monospace;padding:2rem;background:#fff;color:#c00">
-      <h2>🔴 Server Startup Error</h2>
-      <p>The database module failed to load. Check that <code>npm install</code> was run on the server.</p>
-      <pre style="background:#fee;padding:1rem;border-radius:8px">${DB_LOAD_ERROR}</pre>
-      <p>Check <code>startup-error.log</code> in the project folder for full details.</p>
-    </body></html>`);
-  });
-  app.listen(PORT, '0.0.0.0', () => console.error(`❌  Running in ERROR mode on port ${PORT}`));
-  return; // stop here — don't register any real routes
-}
 
 app.get('/pptx/:filename', (req, res) => {
   const filename = path.basename(req.params.filename);
@@ -235,7 +237,7 @@ function requireAuth(req, res, next) {
   }
 }
 
-// ─── Auth Routes ─────────────────────────────────────────────
+// ─── Auth Routes ──────────────────────────────────────────────
 
 // Password complexity checker
 function validatePassword(password) {
@@ -247,7 +249,7 @@ function validatePassword(password) {
 }
 
 // POST /api/auth/register
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { name, email, password } = req.body || {};
   if (!name || !email || !password)
     return res.status(400).json({ error: 'Name, email, and password are required.' });
@@ -255,182 +257,199 @@ app.post('/api/auth/register', (req, res) => {
   const pwErr = validatePassword(password);
   if (pwErr) return res.status(400).json({ error: pwErr });
 
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
-  if (existing)
+  const cleanEmail = email.toLowerCase().trim();
+  const [existing] = await pool.execute('SELECT id FROM users WHERE email = ?', [cleanEmail]);
+  if (existing.length)
     return res.status(409).json({ error: 'An account with this email already exists.' });
 
-  // Auto-admin for designated admin email
-  const cleanEmail = email.toLowerCase().trim();
   const role = cleanEmail === 'icyace007@gmail.com' ? 'admin' : 'learner';
+  const hash = bcrypt.hashSync(password, 12);
+  const [info] = await pool.execute(
+    'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+    [name.trim(), cleanEmail, hash, role]
+  );
 
-  const hash = bcrypt.hashSync(password, 12);  // 12 rounds for stronger hashing
-  const info = db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)')
-                 .run(name.trim(), cleanEmail, hash, role);
-
-  // Demo mode: generate a display code (cosmetic only) and issue JWT immediately
   const code = generateOtp();
-  const newUser = { id: info.lastInsertRowid, name: name.trim(), email: cleanEmail, role };
+  const newUser = { id: info.insertId, name: name.trim(), email: cleanEmail, role };
   const token = jwt.sign({ id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-  console.log(`  ✅  [REG] ${cleanEmail} — auto-verified, demo code: ${code}`);
+  console.log(`  \u2705  [REG] ${cleanEmail} \u2014 auto-verified, demo code: ${code}`);
   res.json({ token, user: newUser, demo_code: code });
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password)
     return res.status(400).json({ error: 'Email and password are required.' });
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+  const user = rows[0];
   if (!user || !bcrypt.compareSync(password, user.password))
     return res.status(401).json({ error: 'Invalid email or password.' });
 
-  // Block unverified accounts
   if (user.email_verified === 0) {
-    // Re-send a fresh verification OTP so they can still complete registration
-    cleanExpiredOtps();
+    await cleanExpiredOtps();
     const code = generateOtp();
     const otpHash = bcrypt.hashSync(code, 8);
-    db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', datetime('now','+30 minutes'))")
-      .run(user.email, otpHash);
-    console.log(`  🔑  [OTP] ${user.email} → ${code}`);
+    await pool.execute(
+      "INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'email', DATE_ADD(NOW(), INTERVAL 30 MINUTE))",
+      [user.email, otpHash]
+    );
+    console.log(`  \ud83d\udd11  [OTP] ${user.email} \u2192 ${code}`);
     return res.status(403).json({ error: 'Please verify your email first.', pending: true, email: user.email, demo_code: code });
   }
 
-  // Record last login IP
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  db.prepare("UPDATE users SET last_ip = ? WHERE id = ?").run(ip, user.id);
+  await pool.execute("UPDATE users SET last_ip = ? WHERE id = ?", [ip, user.id]);
 
   const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
   res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
 });
 
 // GET /api/auth/me
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT id, name, email, role, created_at FROM users WHERE id = ?').get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ user });
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  const [rows] = await pool.execute('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [req.user.id]);
+  if (!rows.length) return res.status(404).json({ error: 'User not found' });
+  res.json({ user: rows[0] });
 });
 
 // ── OTP helpers ──────────────────────────────────────────────
 function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
-function cleanExpiredOtps() {
-  db.prepare("DELETE FROM otp_tokens WHERE expires_at < datetime('now') OR used = 1").run();
+async function cleanExpiredOtps() {
+  await pool.execute("DELETE FROM otp_tokens WHERE expires_at < NOW() OR used = 1");
 }
 
 // POST /api/auth/forgot  — request password-reset OTP
-app.post('/api/auth/forgot', (req, res) => {
+app.post('/api/auth/forgot', async (req, res) => {
   const { email } = req.body || {};
   if (!email) return res.status(400).json({ error: 'Email is required.' });
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase().trim());
-  // Always return same shape (prevent user enumeration)
-  if (!user) return res.json({ ok: true, demo_code: null, message: 'If this email exists, a code was sent.' });
+  const [rows] = await pool.execute('SELECT id FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+  if (!rows.length) return res.json({ ok: true, demo_code: null, message: 'If this email exists, a code was sent.' });
 
-  cleanExpiredOtps();
+  await cleanExpiredOtps();
   const code = generateOtp();
   const hash = bcrypt.hashSync(code, 8);
-  db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'reset', datetime('now','+10 minutes'))").run(email.toLowerCase().trim(), hash);
-  console.log(`  🔑  [RESET OTP] ${email} → ${code}  (expires in 10 min)`);
+  await pool.execute(
+    "INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'reset', DATE_ADD(NOW(), INTERVAL 10 MINUTE))",
+    [email.toLowerCase().trim(), hash]
+  );
+  console.log(`  \ud83d\udd11  [RESET OTP] ${email} \u2192 ${code}  (expires in 10 min)`);
   res.json({ ok: true, demo_code: code, message: 'Demo mode: your reset code is shown below.' });
 });
 
 // POST /api/auth/reset-password  — verify OTP + set new password
-app.post('/api/auth/reset-password', (req, res) => {
+app.post('/api/auth/reset-password', async (req, res) => {
   const { email, code, newPassword } = req.body || {};
   if (!email || !code || !newPassword) return res.status(400).json({ error: 'All fields are required.' });
 
   const pwErr = validatePassword(newPassword);
   if (pwErr) return res.status(400).json({ error: pwErr });
 
-  cleanExpiredOtps();
-  const rows = db.prepare("SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'reset' AND used = 0 AND expires_at > datetime('now') ORDER BY id DESC LIMIT 5").all(email.toLowerCase().trim());
+  await cleanExpiredOtps();
+  const [rows] = await pool.execute(
+    "SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'reset' AND used = 0 AND expires_at > NOW() ORDER BY id DESC LIMIT 5",
+    [email.toLowerCase().trim()]
+  );
   const match = rows.find(r => bcrypt.compareSync(code, r.code_hash));
   if (!match) return res.status(400).json({ error: 'Invalid or expired code. Please request a new one.' });
 
-  db.prepare('UPDATE otp_tokens SET used = 1 WHERE id = ?').run(match.id);
+  await pool.execute('UPDATE otp_tokens SET used = 1 WHERE id = ?', [match.id]);
 
   const hash = bcrypt.hashSync(newPassword, 12);
-  db.prepare('UPDATE users SET password = ? WHERE email = ?').run(hash, email.toLowerCase().trim());
+  await pool.execute('UPDATE users SET password = ? WHERE email = ?', [hash, email.toLowerCase().trim()]);
 
-  const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  const [userRows] = await pool.execute('SELECT id, name, email, role FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+  const user = userRows[0];
   const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
   res.json({ ok: true, token, user });
 });
 
 // POST /api/auth/verify-email  — verify OTP code, mark email as verified, issue JWT
-app.post('/api/auth/verify-email', (req, res) => {
+app.post('/api/auth/verify-email', async (req, res) => {
   const { email, code } = req.body || {};
   if (!email || !code) return res.status(400).json({ error: 'Email and code are required.' });
 
-  cleanExpiredOtps();
-  const rows = db.prepare("SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'email' AND used = 0 AND expires_at > datetime('now') ORDER BY id DESC LIMIT 5").all(email.toLowerCase().trim());
+  await cleanExpiredOtps();
+  const [rows] = await pool.execute(
+    "SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'email' AND used = 0 AND expires_at > NOW() ORDER BY id DESC LIMIT 5",
+    [email.toLowerCase().trim()]
+  );
   const match = rows.find(r => bcrypt.compareSync(code, r.code_hash));
   if (!match) return res.status(400).json({ error: 'Invalid or expired code.' });
 
-  db.prepare('UPDATE otp_tokens SET used = 1 WHERE id = ?').run(match.id);
-  db.prepare('UPDATE users SET email_verified = 1 WHERE email = ?').run(email.toLowerCase().trim());
+  await pool.execute('UPDATE otp_tokens SET used = 1 WHERE id = ?', [match.id]);
+  await pool.execute('UPDATE users SET email_verified = 1 WHERE email = ?', [email.toLowerCase().trim()]);
 
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ?').get(email.toLowerCase().trim());
-  db.prepare("UPDATE users SET last_ip = ? WHERE id = ?").run(ip, user.id);
+  const [userRows] = await pool.execute('SELECT id, name, email, role FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+  const user = userRows[0];
+  await pool.execute("UPDATE users SET last_ip = ? WHERE id = ?", [ip, user.id]);
 
   const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
   res.json({ ok: true, token, user });
 });
 
 // POST /api/auth/2fa/init  — verify password, issue OTP (2FA first step) [LEGACY — kept for resend]
-app.post('/api/auth/2fa/init', (req, res) => {
+app.post('/api/auth/2fa/init', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+  const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+  const user = rows[0];
   if (!user || !bcrypt.compareSync(password, user.password))
     return res.status(401).json({ error: 'Invalid email or password.' });
 
-  cleanExpiredOtps();
+  await cleanExpiredOtps();
   const code = generateOtp();
   const hash = bcrypt.hashSync(code, 8);
-  db.prepare("INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'login', datetime('now','+10 minutes'))").run(user.email, hash);
-  console.log(`  🔐  [2FA OTP] ${user.email} → ${code}  (expires in 10 min)`);
+  await pool.execute(
+    "INSERT INTO otp_tokens (email, code_hash, purpose, expires_at) VALUES (?, ?, 'login', DATE_ADD(NOW(), INTERVAL 10 MINUTE))",
+    [user.email, hash]
+  );
+  console.log(`  \ud83d\udd10  [2FA OTP] ${user.email} \u2192 ${code}  (expires in 10 min)`);
   res.json({ ok: true, demo_code: code, message: 'OTP generated. In production this would be emailed.' });
 });
 
 // POST /api/auth/2fa/verify  — verify OTP, issue JWT
-app.post('/api/auth/2fa/verify', (req, res) => {
+app.post('/api/auth/2fa/verify', async (req, res) => {
   const { email, code } = req.body || {};
   if (!email || !code) return res.status(400).json({ error: 'Email and code are required.' });
 
-  cleanExpiredOtps();
-  const rows = db.prepare("SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'login' AND used = 0 AND expires_at > datetime('now') ORDER BY id DESC LIMIT 5").all(email.toLowerCase().trim());
+  await cleanExpiredOtps();
+  const [rows] = await pool.execute(
+    "SELECT * FROM otp_tokens WHERE email = ? AND purpose = 'login' AND used = 0 AND expires_at > NOW() ORDER BY id DESC LIMIT 5",
+    [email.toLowerCase().trim()]
+  );
   const match = rows.find(r => bcrypt.compareSync(code, r.code_hash));
   if (!match) return res.status(400).json({ error: 'Invalid or expired code.' });
 
-  db.prepare('UPDATE otp_tokens SET used = 1 WHERE id = ?').run(match.id);
+  await pool.execute('UPDATE otp_tokens SET used = 1 WHERE id = ?', [match.id]);
 
   const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ?').get(email.toLowerCase().trim());
-  db.prepare("UPDATE users SET last_ip = ? WHERE id = ?").run(ip, user.id);
+  const [userRows] = await pool.execute('SELECT id, name, email, role FROM users WHERE email = ?', [email.toLowerCase().trim()]);
+  const user = userRows[0];
+  await pool.execute("UPDATE users SET last_ip = ? WHERE id = ?", [ip, user.id]);
 
   const token = jwt.sign({ id: user.id, email: user.email, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
   res.json({ ok: true, token, user });
 });
 
-// ─── Progress Routes ─────────────────────────────────────────
+// ─── Progress Routes ───────────────────────────────────────────
 
 // GET /api/progress  — full dashboard data for current user
-app.get('/api/progress', requireAuth, (req, res) => {
+app.get('/api/progress', requireAuth, async (req, res) => {
   const uid = req.user.id;
 
-  const visits = db.prepare('SELECT page, visited_at FROM page_visits WHERE user_id = ? ORDER BY visited_at').all(uid);
-  const quizzes = db.prepare('SELECT * FROM quiz_attempts WHERE user_id = ? ORDER BY taken_at DESC LIMIT 10').all(uid);
-  const games   = db.prepare('SELECT * FROM game_attempts WHERE user_id = ? ORDER BY played_at DESC LIMIT 10').all(uid);
-  const completions = db.prepare('SELECT module_id, mcq_score, mcq_total, completed_at FROM module_completions WHERE user_id = ?').all(uid);
+  const [visits]      = await pool.execute('SELECT page, visited_at FROM page_visits WHERE user_id = ? ORDER BY visited_at', [uid]);
+  const [quizzes]     = await pool.execute('SELECT * FROM quiz_attempts WHERE user_id = ? ORDER BY taken_at DESC LIMIT 10', [uid]);
+  const [games]       = await pool.execute('SELECT * FROM game_attempts WHERE user_id = ? ORDER BY played_at DESC LIMIT 10', [uid]);
+  const [completions] = await pool.execute('SELECT module_id, mcq_score, mcq_total, completed_at FROM module_completions WHERE user_id = ?', [uid]);
 
-  const bestQuiz = db.prepare('SELECT MAX(pct) as best_pct, COUNT(*) as attempts FROM quiz_attempts WHERE user_id = ?').get(uid);
-  const bestGame = db.prepare('SELECT MAX(score) as best_score, COUNT(*) as attempts FROM game_attempts WHERE user_id = ?').get(uid);
-  const userRow  = db.prepare('SELECT created_at FROM users WHERE id = ?').get(uid);
+  const [[bestQuiz]]  = await pool.execute('SELECT MAX(pct) as best_pct, COUNT(*) as attempts FROM quiz_attempts WHERE user_id = ?', [uid]);
+  const [[bestGame]]  = await pool.execute('SELECT MAX(score) as best_score, COUNT(*) as attempts FROM game_attempts WHERE user_id = ?', [uid]);
+  const [[userRow]]   = await pool.execute('SELECT created_at FROM users WHERE id = ?', [uid]);
 
   res.json({
     visits,
@@ -444,77 +463,82 @@ app.get('/api/progress', requireAuth, (req, res) => {
 });
 
 // POST /api/progress/visit  — mark a page visited
-app.post('/api/progress/visit', requireAuth, (req, res) => {
+app.post('/api/progress/visit', requireAuth, async (req, res) => {
   const { page } = req.body || {};
   if (!page) return res.status(400).json({ error: 'page is required' });
-  db.prepare('INSERT OR IGNORE INTO page_visits (user_id, page) VALUES (?, ?)').run(req.user.id, page);
-  const visits = db.prepare('SELECT page FROM page_visits WHERE user_id = ?').all(req.user.id).map(r => r.page);
-  res.json({ visits });
+  await pool.execute('INSERT IGNORE INTO page_visits (user_id, page) VALUES (?, ?)', [req.user.id, page]);
+  const [rows] = await pool.execute('SELECT page FROM page_visits WHERE user_id = ?', [req.user.id]);
+  res.json({ visits: rows.map(r => r.page) });
 });
 
 // POST /api/progress/quiz  — save a quiz attempt
-app.post('/api/progress/quiz', requireAuth, (req, res) => {
+app.post('/api/progress/quiz', requireAuth, async (req, res) => {
   const { score, total, pct, passed, elapsed_sec, filter } = req.body || {};
-  db.prepare('INSERT INTO quiz_attempts (user_id, score, total, pct, passed, elapsed_sec, filter) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(req.user.id, score, total, pct, passed ? 1 : 0, elapsed_sec || 0, filter || 'all');
+  await pool.execute(
+    'INSERT INTO quiz_attempts (user_id, score, total, pct, passed, elapsed_sec, filter) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [req.user.id, score, total, pct, passed ? 1 : 0, elapsed_sec || 0, filter || 'all']
+  );
   res.json({ ok: true });
 });
 
 // POST /api/progress/game  — save a game attempt
-app.post('/api/progress/game', requireAuth, (req, res) => {
+app.post('/api/progress/game', requireAuth, async (req, res) => {
   const { score, correct, total, max_streak, rank } = req.body || {};
-  db.prepare('INSERT INTO game_attempts (user_id, score, correct, total, max_streak, rank) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(req.user.id, score, correct, total, max_streak || 0, rank || '');
+  await pool.execute(
+    'INSERT INTO game_attempts (user_id, score, correct, total, max_streak, rank) VALUES (?, ?, ?, ?, ?, ?)',
+    [req.user.id, score, correct, total, max_streak || 0, rank || '']
+  );
   res.json({ ok: true });
 });
 
 // POST /api/progress/module-complete  — mark a module fully completed
-app.post('/api/progress/module-complete', requireAuth, (req, res) => {
+app.post('/api/progress/module-complete', requireAuth, async (req, res) => {
   const { module_id, mcq_score, mcq_total } = req.body || {};
   if (!module_id) return res.status(400).json({ error: 'module_id required' });
-  db.prepare(`
-    INSERT INTO module_completions (user_id, module_id, mcq_score, mcq_total)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(user_id, module_id) DO UPDATE SET
-      mcq_score = excluded.mcq_score,
-      mcq_total = excluded.mcq_total,
-      completed_at = datetime('now')
-  `).run(req.user.id, module_id, mcq_score ?? null, mcq_total ?? null);
+  await pool.execute(
+    `INSERT INTO module_completions (user_id, module_id, mcq_score, mcq_total)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       mcq_score    = VALUES(mcq_score),
+       mcq_total    = VALUES(mcq_total),
+       completed_at = NOW()`,
+    [req.user.id, module_id, mcq_score ?? null, mcq_total ?? null]
+  );
   res.json({ ok: true });
 });
 
-// ─── Video Routes ─────────────────────────────────────────────
+// ─── Video Routes ───────────────────────────────────────────────
 
 // GET /api/videos/:moduleId  — public: get video URL for a module
-app.get('/api/videos/:moduleId', (req, res) => {
-  const row = db.prepare('SELECT url FROM module_videos WHERE module_id = ?').get(req.params.moduleId);
-  res.json({ url: row ? row.url : '' });
+app.get('/api/videos/:moduleId', async (req, res) => {
+  const [rows] = await pool.execute('SELECT url FROM module_videos WHERE module_id = ?', [req.params.moduleId]);
+  res.json({ url: rows.length ? rows[0].url : '' });
 });
 
 // POST /api/admin/videos/:moduleId  — admin only: set video URL
-app.post('/api/admin/videos/:moduleId', requireAuth, (req, res) => {
+app.post('/api/admin/videos/:moduleId', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const { url } = req.body || {};
   if (url === undefined) return res.status(400).json({ error: 'url required' });
-  db.prepare(`
-    INSERT INTO module_videos (module_id, url, updated_at) VALUES (?, ?, datetime('now'))
-    ON CONFLICT(module_id) DO UPDATE SET url = excluded.url, updated_at = excluded.updated_at
-  `).run(req.params.moduleId, url.trim());
+  await pool.execute(
+    'INSERT INTO module_videos (module_id, url) VALUES (?, ?) ON DUPLICATE KEY UPDATE url = VALUES(url), updated_at = NOW()',
+    [req.params.moduleId, url.trim()]
+  );
   res.json({ ok: true });
 });
 
 // GET /api/admin/videos  — admin: get all video configs
-app.get('/api/admin/videos', requireAuth, (req, res) => {
+app.get('/api/admin/videos', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const rows = db.prepare('SELECT module_id, url, updated_at FROM module_videos ORDER BY module_id').all();
+  const [rows] = await pool.execute('SELECT module_id, url, updated_at FROM module_videos ORDER BY module_id');
   res.json({ videos: rows });
 });
 
-// ─── Admin Route (all users summary) ─────────────────────────
-app.get('/api/admin/users', requireAuth, (req, res) => {
+// ─── Admin Route (all users summary) ───────────────────────
+app.get('/api/admin/users', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
 
-  const users = db.prepare(`
+  const [users] = await pool.execute(`
     SELECT u.id, u.name, u.email, u.role, u.created_at,
            COALESCE(u.last_ip, '') as last_ip,
            (SELECT COUNT(*) FROM page_visits WHERE user_id = u.id) as pages_visited,
@@ -522,111 +546,90 @@ app.get('/api/admin/users', requireAuth, (req, res) => {
            (SELECT COUNT(*) FROM quiz_attempts WHERE user_id = u.id) as quiz_attempts,
            (SELECT MAX(score) FROM game_attempts WHERE user_id = u.id) as best_game_score
     FROM users u ORDER BY u.created_at DESC
-  `).all();
+  `);
 
   res.json({ users });
 });
 
 // GET /api/admin/stats  — aggregate stats for admin dashboard
-app.get('/api/admin/stats', requireAuth, (req, res) => {
+app.get('/api/admin/stats', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
 
-  const totalUsers    = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
-  const totalVisits   = db.prepare('SELECT COUNT(*) as c FROM page_visits').get().c;
-  const totalQuizzes  = db.prepare('SELECT COUNT(*) as c FROM quiz_attempts').get().c;
-  const totalGames    = db.prepare('SELECT COUNT(*) as c FROM game_attempts').get().c;
-  const passRate      = db.prepare('SELECT ROUND(100.0*SUM(passed)/COUNT(*)) as r FROM quiz_attempts').get().r || 0;
-  const avgQuizPct    = db.prepare('SELECT ROUND(AVG(pct)) as r FROM quiz_attempts').get().r || 0;
-  const avgGameScore  = db.prepare('SELECT ROUND(AVG(score)) as r FROM game_attempts').get().r || 0;
+  const [[totU]]  = await pool.execute('SELECT COUNT(*) as c FROM users');
+  const [[totV]]  = await pool.execute('SELECT COUNT(*) as c FROM page_visits');
+  const [[totQ]]  = await pool.execute('SELECT COUNT(*) as c FROM quiz_attempts');
+  const [[totG]]  = await pool.execute('SELECT COUNT(*) as c FROM game_attempts');
+  const [[pass]]  = await pool.execute('SELECT ROUND(100*SUM(passed)/COUNT(*)) as r FROM quiz_attempts');
+  const [[avgQ]]  = await pool.execute('SELECT ROUND(AVG(pct)) as r FROM quiz_attempts');
+  const [[avgG]]  = await pool.execute('SELECT ROUND(AVG(score)) as r FROM game_attempts');
 
-  // Page popularity
-  const pageStats = db.prepare(`
-    SELECT page, COUNT(*) as visits
-    FROM page_visits GROUP BY page ORDER BY visits DESC
-  `).all();
-
-  // Per-page unique visitor count
-  const pageUniq = db.prepare(`
-    SELECT page, COUNT(DISTINCT user_id) as uniq_users
-    FROM page_visits GROUP BY page ORDER BY uniq_users DESC
-  `).all();
-
-  // Recent registrations (last 10)
-  const recentUsers = db.prepare(`
+  const [pageStats] = await pool.execute('SELECT page, COUNT(*) as visits FROM page_visits GROUP BY page ORDER BY visits DESC');
+  const [pageUniq]  = await pool.execute('SELECT page, COUNT(DISTINCT user_id) as uniq_users FROM page_visits GROUP BY page ORDER BY uniq_users DESC');
+  const [recentUsers] = await pool.execute(`
     SELECT id, name, email, role, created_at,
            (SELECT COUNT(*) FROM page_visits WHERE user_id = u.id) as pages_visited
     FROM users u ORDER BY created_at DESC LIMIT 10
-  `).all();
-
-  // Registrations per day (last 14 days)
-  const regTimeline = db.prepare(`
+  `);
+  const [regTimeline] = await pool.execute(`
     SELECT DATE(created_at) as day, COUNT(*) as count
     FROM users
-    WHERE created_at >= DATE('now', '-14 days')
+    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
     GROUP BY day ORDER BY day
-  `).all();
-
-  // Quiz score distribution
-  const scoreBuckets = db.prepare(`
+  `);
+  const [[scoreBuckets]] = await pool.execute(`
     SELECT
       SUM(CASE WHEN pct < 40 THEN 1 ELSE 0 END) as below40,
       SUM(CASE WHEN pct >= 40 AND pct < 70 THEN 1 ELSE 0 END) as p40_70,
       SUM(CASE WHEN pct >= 70 AND pct < 90 THEN 1 ELSE 0 END) as p70_90,
       SUM(CASE WHEN pct >= 90 THEN 1 ELSE 0 END) as above90
     FROM quiz_attempts
-  `).get();
-
-  // Per-module completion counts
-  const moduleSummary = db.prepare(`
-    SELECT module_id, COUNT(DISTINCT user_id) as users_completed
-    FROM module_completions GROUP BY module_id ORDER BY module_id
-  `).all();
-
-  // Total feedback submissions
-  const totalFeedback = db.prepare('SELECT COUNT(*) as c FROM feedback').get().c;
+  `);
+  const [moduleSummary] = await pool.execute('SELECT module_id, COUNT(DISTINCT user_id) as users_completed FROM module_completions GROUP BY module_id ORDER BY module_id');
+  const [[totF]] = await pool.execute('SELECT COUNT(*) as c FROM feedback');
 
   res.json({
-    totals: { users: totalUsers, visits: totalVisits, quizzes: totalQuizzes, games: totalGames },
-    rates:  { passRate, avgQuizPct, avgGameScore },
-    pageStats, pageUniq, recentUsers, regTimeline, scoreBuckets, moduleSummary, totalFeedback
+    totals: { users: totU.c, visits: totV.c, quizzes: totQ.c, games: totG.c },
+    rates:  { passRate: pass.r || 0, avgQuizPct: avgQ.r || 0, avgGameScore: avgG.r || 0 },
+    pageStats, pageUniq, recentUsers, regTimeline, scoreBuckets, moduleSummary,
+    totalFeedback: totF.c
   });
 });
 
 // POST /api/admin/promote  — promote a user to admin
-app.post('/api/admin/promote', requireAuth, (req, res) => {
+app.post('/api/admin/promote', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'userId required' });
-  db.prepare('UPDATE users SET role = ? WHERE id = ?').run('admin', userId);
+  await pool.execute('UPDATE users SET role = ? WHERE id = ?', ['admin', userId]);
   res.json({ ok: true });
 });
 
 // DELETE /api/admin/users/:id  — remove a non-admin user
-app.delete('/api/admin/users/:id', requireAuth, (req, res) => {
+app.delete('/api/admin/users/:id', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const targetId = parseInt(req.params.id, 10);
   if (!targetId || targetId === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
-  const target = db.prepare('SELECT role FROM users WHERE id = ?').get(targetId);
-  if (!target) return res.status(404).json({ error: 'User not found' });
-  if (target.role === 'admin') return res.status(403).json({ error: 'Cannot delete another admin' });
-  db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+  const [rows] = await pool.execute('SELECT role FROM users WHERE id = ?', [targetId]);
+  if (!rows.length) return res.status(404).json({ error: 'User not found' });
+  if (rows[0].role === 'admin') return res.status(403).json({ error: 'Cannot delete another admin' });
+  await pool.execute('DELETE FROM users WHERE id = ?', [targetId]);
   res.json({ ok: true });
 });
 
 // POST /api/admin/demote  — demote an admin back to learner
-app.post('/api/admin/demote', requireAuth, (req, res) => {
+app.post('/api/admin/demote', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'userId required' });
   if (userId === req.user.id) return res.status(400).json({ error: 'Cannot demote yourself' });
-  db.prepare("UPDATE users SET role = 'learner' WHERE id = ?").run(userId);
+  await pool.execute("UPDATE users SET role = 'learner' WHERE id = ?", [userId]);
   res.json({ ok: true });
 });
 
 // GET /api/admin/export-csv  — download all users as CSV
-app.get('/api/admin/export-csv', requireAuth, (req, res) => {
+app.get('/api/admin/export-csv', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const users = db.prepare(`
+  const [users] = await pool.execute(`
     SELECT u.id, u.name, u.email, u.role, u.created_at,
            COALESCE(u.last_ip,'') as last_ip,
            (SELECT COUNT(*) FROM page_visits WHERE user_id = u.id) as pages_visited,
@@ -634,7 +637,7 @@ app.get('/api/admin/export-csv', requireAuth, (req, res) => {
            (SELECT COUNT(*) FROM quiz_attempts WHERE user_id = u.id) as quiz_attempts,
            (SELECT MAX(score) FROM game_attempts WHERE user_id = u.id) as best_game_score
     FROM users u ORDER BY u.created_at DESC
-  `).all();
+  `);
   const header = 'id,name,email,role,created_at,last_ip,pages_visited,best_quiz_pct,quiz_attempts,best_game_score';
   const rows = users.map(u =>
     [u.id, `"${u.name.replace(/"/g,'""')}"`, `"${u.email}"`, u.role, u.created_at,
@@ -646,31 +649,32 @@ app.get('/api/admin/export-csv', requireAuth, (req, res) => {
 });
 
 // POST /api/feedback  — public: submit a feedback entry
-app.post('/api/feedback', (req, res) => {
+app.post('/api/feedback', async (req, res) => {
   const { name, email, age_group, industry, remarks } = req.body || {};
   if (!name || !email || !age_group || !industry)
     return res.status(400).json({ error: 'Name, email, age group and industry are required.' });
-  db.prepare(
-    'INSERT INTO feedback (name, email, age_group, industry, remarks) VALUES (?, ?, ?, ?, ?)'
-  ).run(name.trim(), email.toLowerCase().trim(), age_group, industry, (remarks || '').trim());
+  await pool.execute(
+    'INSERT INTO feedback (name, email, age_group, industry, remarks) VALUES (?, ?, ?, ?, ?)',
+    [name.trim(), email.toLowerCase().trim(), age_group, industry, (remarks || '').trim()]
+  );
   res.json({ ok: true });
 });
 
 // GET /api/admin/feedback  — admin: list all feedback
-app.get('/api/admin/feedback', requireAuth, (req, res) => {
+app.get('/api/admin/feedback', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const rows = db.prepare(
+  const [rows] = await pool.execute(
     'SELECT id, name, email, age_group, industry, remarks, submitted_at FROM feedback ORDER BY submitted_at DESC'
-  ).all();
+  );
   res.json({ feedback: rows });
 });
 
 // GET /api/admin/export-feedback  — admin: CSV download
-app.get('/api/admin/export-feedback', requireAuth, (req, res) => {
+app.get('/api/admin/export-feedback', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const rows = db.prepare(
+  const [rows] = await pool.execute(
     'SELECT id, name, email, age_group, industry, remarks, submitted_at FROM feedback ORDER BY submitted_at DESC'
-  ).all();
+  );
   const header = 'id,name,email,age_group,industry,remarks,submitted_at';
   const lines = rows.map(r =>
     [r.id, `"${r.name.replace(/"/g,'""')}"`, `"${r.email}"`, `"${r.age_group}"`,
@@ -682,11 +686,11 @@ app.get('/api/admin/export-feedback', requireAuth, (req, res) => {
 });
 
 // GET /api/admin/export-feedback-excel  — admin: Excel .xlsx download
-app.get('/api/admin/export-feedback-excel', requireAuth, (req, res) => {
+app.get('/api/admin/export-feedback-excel', requireAuth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
-  const rows = db.prepare(
+  const [rows] = await pool.execute(
     'SELECT id, name, email, age_group, industry, remarks, submitted_at FROM feedback ORDER BY submitted_at DESC'
-  ).all();
+  );
   const ws = XLSX.utils.json_to_sheet(rows.map(r => ({
     'ID':           r.id,
     'Name':         r.name,
@@ -706,10 +710,10 @@ app.get('/api/admin/export-feedback-excel', requireAuth, (req, res) => {
 });
 
 // POST /api/admin/seed  — make yourself admin (only works if you have no admins yet)
-app.post('/api/admin/seed', requireAuth, (req, res) => {
-  const adminCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE role='admin'").get().c;
-  if (adminCount > 0) return res.status(403).json({ error: 'Admins already exist' });
-  db.prepare('UPDATE users SET role = ? WHERE id = ?').run('admin', req.user.id);
+app.post('/api/admin/seed', requireAuth, async (req, res) => {
+  const [[{ c }]] = await pool.execute("SELECT COUNT(*) as c FROM users WHERE role='admin'");
+  if (c > 0) return res.status(403).json({ error: 'Admins already exist' });
+  await pool.execute('UPDATE users SET role = ? WHERE id = ?', ['admin', req.user.id]);
   const token = jwt.sign(
     { id: req.user.id, email: req.user.email, name: req.user.name, role: 'admin' },
     JWT_SECRET, { expiresIn: JWT_EXPIRY }
@@ -767,12 +771,16 @@ app.get('*', (req, res) => {
   }
 });
 
-// ─── Start ────────────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  🛡️  FIN7900 Training Platform`);
-  console.log(`  ─────────────────────────────────`);
-  console.log(`  Local:   http://localhost:${PORT}`);
-  console.log(`  Auth:    http://localhost:${PORT}/auth.html`);
-  console.log(`  DB:      ${DB_PATH}`);
-  console.log(`  Mode:    🎯  Demo — OTP codes shown on screen\n`);
+// ─── Start ───────────────────────────────────────────────────
+initDb().then(() => {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n  \ud83d\udee1\ufe0f  FIN7900 Training Platform`);
+    console.log(`  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+    console.log(`  Local:   http://localhost:${PORT}`);
+    console.log(`  DB:      MySQL @ ${process.env.DB_HOST || 'localhost'}/${process.env.DB_NAME || 'fin7900'}`);
+    console.log(`  Mode:    \ud83c\udfaf  Demo \u2014 OTP codes shown on screen\n`);
+  });
+}).catch(err => {
+  console.error('\u274c  Failed to start:', err.message);
+  process.exit(1);
 });
