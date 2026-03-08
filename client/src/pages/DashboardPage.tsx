@@ -40,6 +40,36 @@ interface ProgressData {
   created_at: string | null
 }
 
+const EMPTY_PROGRESS: ProgressData = {
+  visits: [],
+  quizBest: { best_pct: null, attempts: 0 },
+  gameBest: { best_score: null, attempts: 0 },
+  quizHistory: [],
+  gameHistory: [],
+  moduleCompletions: [],
+  created_at: null,
+}
+
+function normalizeProgressData(raw: unknown): ProgressData {
+  if (!raw || typeof raw !== 'object') return EMPTY_PROGRESS
+  const r = raw as Record<string, any>
+  return {
+    visits: Array.isArray(r.visits) ? r.visits : [],
+    quizBest: {
+      best_pct: typeof r.quizBest?.best_pct === 'number' ? r.quizBest.best_pct : null,
+      attempts: Number(r.quizBest?.attempts ?? 0),
+    },
+    gameBest: {
+      best_score: typeof r.gameBest?.best_score === 'number' ? r.gameBest.best_score : null,
+      attempts: Number(r.gameBest?.attempts ?? 0),
+    },
+    quizHistory: Array.isArray(r.quizHistory) ? r.quizHistory : [],
+    gameHistory: Array.isArray(r.gameHistory) ? r.gameHistory : [],
+    moduleCompletions: Array.isArray(r.moduleCompletions) ? r.moduleCompletions : [],
+    created_at: typeof r.created_at === 'string' ? r.created_at : null,
+  }
+}
+
 // XP + Level system
 const LEVELS = [
   { min: 0,    label: 'Novice',     emoji: '🌱', color: 'text-slate-400'  },
@@ -90,15 +120,19 @@ function getLevel(xp: number) {
 
 export default function DashboardPage() {
   const { user, token } = useAuth()
-  const [data, setData] = useState<ProgressData | null>(null)
+  const [data, setData] = useState<ProgressData>(EMPTY_PROGRESS)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!token) { setLoading(false); return }
     fetch('/api/progress', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => { setData(d); setLoading(false) })
-      .catch(() => setLoading(false))
+      .then(async r => {
+        const body = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(typeof body?.error === 'string' ? body.error : 'Failed to load progress')
+        setData(normalizeProgressData(body))
+      })
+      .catch(() => setData(EMPTY_PROGRESS))
+      .finally(() => setLoading(false))
   }, [token])
 
   if (!user) {
@@ -122,11 +156,11 @@ export default function DashboardPage() {
     )
   }
 
-  const visitedPages = new Set(data?.visits.map(v => v.page) || [])
+  const visitedPages = new Set((data.visits || []).map(v => v.page))
   // Merge API completions with localStorage fallback (works even if server is momentarily unreachable)
   const localKey = `gyd_completed_${user?.id}`
   const localCompletions: string[] = (() => { try { return JSON.parse(localStorage.getItem(localKey) || '[]') } catch { return [] } })()
-  const completedIds = new Set([...(data?.moduleCompletions || []).map(c => c.module_id), ...localCompletions])
+  const completedIds = new Set([...(data.moduleCompletions || []).map(c => c.module_id), ...localCompletions])
   const modulesVisited = ['/module/1', '/module/2', '/module/3', '/module/4', '/module/5'].filter(p => visitedPages.has(p)).length
   const modulesCompleted = ['mod1','mod2','mod3','mod4','mod5'].filter(id => completedIds.has(id)).length
   const pagesVisited = visitedPages.size
@@ -137,7 +171,7 @@ export default function DashboardPage() {
   const xpToNext = level.next ? level.next.min - xp : 0
   const levelPct = level.next ? Math.round(((xp - level.min) / (level.next.min - level.min)) * 100) : 100
 
-  const quizHistory = data?.quizHistory || []
+  const quizHistory = data.quizHistory || []
   const chartData = quizHistory.slice(0, 8).reverse().map((q, i) => ({
     attempt: `#${i + 1}`,
     score: q.pct,
@@ -148,10 +182,10 @@ export default function DashboardPage() {
     { name: 'Completed', value: moduleProgress, fill: '#10b981' },
   ]
 
-  const bestQuiz = data?.quizBest.best_pct ?? 0
-  const quizAttempts = data?.quizBest.attempts ?? 0
-  const bestGame = data?.gameBest.best_score ?? 0
-  const gameAttempts = data?.gameBest.attempts ?? 0
+  const bestQuiz = data.quizBest.best_pct ?? 0
+  const quizAttempts = data.quizBest.attempts ?? 0
+  const bestGame = data.gameBest.best_score ?? 0
+  const gameAttempts = data.gameBest.attempts ?? 0
 
   const gradeLabel = bestQuiz >= 90 ? 'Distinction' : bestQuiz >= 70 ? 'Credit' : bestQuiz >= 50 ? 'Pass' : bestQuiz > 0 ? 'Attempting' : '—'
   const gradeColor = bestQuiz >= 90 ? 'text-emerald-400' : bestQuiz >= 70 ? 'text-blue-400' : bestQuiz >= 50 ? 'text-amber-400' : 'text-slate-400'
@@ -344,11 +378,11 @@ export default function DashboardPage() {
         </div>
 
         {/* Recent game history */}
-        {(data?.gameHistory?.length ?? 0) > 0 && (
+        {(data.gameHistory?.length ?? 0) > 0 && (
           <div className="card">
             <h2 className="text-white font-bold mb-4">Recent Game Attempts</h2>
             <div className="space-y-2">
-              {data!.gameHistory.slice(0, 5).map((g, i) => (
+              {data.gameHistory.slice(0, 5).map((g, i) => (
                 <div key={i} className="flex items-center justify-between bg-slate-800/40 rounded-xl px-4 py-3">
                   <div className="flex items-center gap-3">
                     <span className="text-lg">🎮</span>
@@ -368,7 +402,7 @@ export default function DashboardPage() {
         )}
 
         {/* Member since */}
-        {data?.created_at && (
+        {data.created_at && (
           <div className="flex items-center gap-2 text-slate-500 text-xs">
             <Calendar className="w-4 h-4" />
             Member since {new Date(data.created_at).toLocaleDateString('en-HK', { year: 'numeric', month: 'long', day: 'numeric' })}

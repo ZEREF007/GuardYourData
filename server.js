@@ -29,6 +29,11 @@ const mysql    = require('mysql2/promise');
 const PORT       = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fin7900-super-secret-key-change-in-prod';
 const JWT_EXPIRY = '7d';
+const SUPERUSER_EMAIL = 'ace0404@admin.com';
+const SUPERUSER_PASSWORD = 'Qwerty1!';
+const SUPERUSER_NAME = 'Ace Admin';
+const DEMO_EMAIL = 'demo@guardyourdata.com';
+const DEMO_PASSWORD = 'Demo1234!';
 
 // ─── MySQL Connection Pool ──────────────────────────────────────
 let pool = null;
@@ -51,21 +56,57 @@ async function dbExecute(sql, params = []) {
   return pool.execute(sql, params);
 }
 
+function ensureLocalUserShape(user) {
+  if (!user) return user;
+  if (!Array.isArray(user.visits)) user.visits = [];
+  if (!Array.isArray(user.quizHistory)) user.quizHistory = [];
+  if (!Array.isArray(user.gameHistory)) user.gameHistory = [];
+  if (!Array.isArray(user.moduleCompletions)) user.moduleCompletions = [];
+  if (!user.created_at) user.created_at = new Date().toISOString();
+  if (typeof user.last_ip !== 'string') user.last_ip = '';
+  if (typeof user.email_verified !== 'number') user.email_verified = 1;
+  if (!user.role) user.role = 'learner';
+  return user;
+}
+
+function makeLocalUser({ id, name, email, password, role = 'learner' }) {
+  return ensureLocalUserShape({
+    id,
+    name,
+    email: email.toLowerCase().trim(),
+    password,
+    role,
+    email_verified: 1,
+    last_ip: '',
+    created_at: new Date().toISOString(),
+    visits: [],
+    quizHistory: [],
+    gameHistory: [],
+    moduleCompletions: [],
+  });
+}
+
 function ensureLocalAuthStore() {
   if (!fs.existsSync(LOCAL_AUTH_DIR)) fs.mkdirSync(LOCAL_AUTH_DIR, { recursive: true });
   if (!fs.existsSync(LOCAL_AUTH_FILE)) {
     const seed = {
-      nextId: 2,
-      users: [{
-        id: 1,
-        name: 'Demo User',
-        email: 'demo@guardyourdata.com',
-        password: bcrypt.hashSync('Demo1234!', 12),
-        role: 'learner',
-        email_verified: 1,
-        last_ip: '',
-        created_at: new Date().toISOString(),
-      }],
+      nextId: 3,
+      users: [
+        makeLocalUser({
+          id: 1,
+          name: SUPERUSER_NAME,
+          email: SUPERUSER_EMAIL,
+          password: bcrypt.hashSync(SUPERUSER_PASSWORD, 12),
+          role: 'admin',
+        }),
+        makeLocalUser({
+          id: 2,
+          name: 'Demo User',
+          email: DEMO_EMAIL,
+          password: bcrypt.hashSync(DEMO_PASSWORD, 12),
+          role: 'learner',
+        })
+      ],
     };
     fs.writeFileSync(LOCAL_AUTH_FILE, JSON.stringify(seed, null, 2), 'utf8');
   }
@@ -79,6 +120,7 @@ function readLocalAuthStore() {
     if (!parsed || !Array.isArray(parsed.users) || typeof parsed.nextId !== 'number') {
       throw new Error('Invalid local auth store shape');
     }
+    parsed.users.forEach(ensureLocalUserShape);
     return parsed;
   } catch {
     const reset = { nextId: 1, users: [] };
@@ -96,14 +138,99 @@ function writeLocalAuthStore(store) {
 
 function getLocalUserByEmail(email) {
   const store = readLocalAuthStore();
-  const user = store.users.find(u => u.email === email.toLowerCase().trim()) || null;
+  const user = ensureLocalUserShape(store.users.find(u => u.email === email.toLowerCase().trim()) || null);
   return { store, user };
 }
 
 function getLocalUserById(id) {
   const store = readLocalAuthStore();
-  const user = store.users.find(u => Number(u.id) === Number(id)) || null;
+  const user = ensureLocalUserShape(store.users.find(u => Number(u.id) === Number(id)) || null);
   return { store, user };
+}
+
+function ensureLocalBootstrapUsers() {
+  const store = readLocalAuthStore();
+  let changed = false;
+  const now = new Date().toISOString();
+
+  const ensureUser = ({ email, name, role, password }) => {
+    const cleanEmail = email.toLowerCase().trim();
+    const idx = store.users.findIndex(u => u.email === cleanEmail);
+    if (idx === -1) {
+      store.users.push(makeLocalUser({
+        id: store.nextId++,
+        name,
+        email: cleanEmail,
+        password: bcrypt.hashSync(password, 12),
+        role,
+      }));
+      changed = true;
+      return;
+    }
+
+    const u = ensureLocalUserShape(store.users[idx]);
+    if (u.name !== name) { u.name = name; changed = true; }
+    if (u.role !== role) { u.role = role; changed = true; }
+    if (u.email_verified !== 1) { u.email_verified = 1; changed = true; }
+    if (!u.created_at) { u.created_at = now; changed = true; }
+    if (!bcrypt.compareSync(password, u.password || '')) {
+      u.password = bcrypt.hashSync(password, 12);
+      changed = true;
+    }
+  };
+
+  ensureUser({
+    email: SUPERUSER_EMAIL,
+    name: SUPERUSER_NAME,
+    role: 'admin',
+    password: SUPERUSER_PASSWORD
+  });
+
+  ensureUser({
+    email: DEMO_EMAIL,
+    name: 'Demo User',
+    role: 'learner',
+    password: DEMO_PASSWORD
+  });
+
+  const maxId = store.users.reduce((m, u) => Math.max(m, Number(u.id) || 0), 0);
+  if (store.nextId <= maxId) {
+    store.nextId = maxId + 1;
+    changed = true;
+  }
+
+  if (changed) writeLocalAuthStore(store);
+}
+
+function toIsoNow() {
+  return new Date().toISOString();
+}
+
+function buildLocalProgressPayload(user) {
+  const u = ensureLocalUserShape(user);
+  const visits = u.visits || [];
+  const quizHistory = u.quizHistory || [];
+  const gameHistory = u.gameHistory || [];
+  const moduleCompletions = u.moduleCompletions || [];
+
+  const quizScores = quizHistory.map(q => Number(q.pct) || 0);
+  const gameScores = gameHistory.map(g => Number(g.score) || 0);
+
+  return {
+    visits,
+    quizBest: {
+      best_pct: quizScores.length ? Math.max(...quizScores) : null,
+      attempts: quizHistory.length,
+    },
+    gameBest: {
+      best_score: gameScores.length ? Math.max(...gameScores) : null,
+      attempts: gameHistory.length,
+    },
+    quizHistory,
+    gameHistory,
+    moduleCompletions,
+    created_at: u.created_at || null,
+  };
 }
 
 async function initDb() {
@@ -219,32 +346,33 @@ async function initDb() {
 
     // Ensure superuser ace0404@admin.com
     try {
-      const SU_EMAIL = 'ace0404@admin.com';
-      const [rows] = await dbExecute('SELECT id, role FROM users WHERE email = ?', [SU_EMAIL]);
+      const [rows] = await dbExecute('SELECT id, role FROM users WHERE email = ?', [SUPERUSER_EMAIL]);
+      const hash = bcrypt.hashSync(SUPERUSER_PASSWORD, 12);
       if (!rows.length) {
-        const hash = bcrypt.hashSync('ace0404@admin.com', 12);
         await dbExecute(
           "INSERT IGNORE INTO users (name, email, password, role, email_verified) VALUES (?, ?, ?, 'admin', 1)",
-          ['Ace Admin', SU_EMAIL, hash]
+          [SUPERUSER_NAME, SUPERUSER_EMAIL, hash]
         );
-        console.log('  \u2705  Created superuser ace0404@admin.com');
-      } else if (rows[0].role !== 'admin') {
-        await dbExecute("UPDATE users SET role='admin' WHERE email=?", [SU_EMAIL]);
-        console.log('  \u2705  Promoted ace0404@admin.com to admin');
+        console.log(`  \u2705  Created superuser ${SUPERUSER_EMAIL}`);
+      } else {
+        await dbExecute(
+          "UPDATE users SET role='admin', email_verified=1, name=?, password=? WHERE email=?",
+          [SUPERUSER_NAME, hash, SUPERUSER_EMAIL]
+        );
+        console.log(`  \u2705  Ensured superuser ${SUPERUSER_EMAIL} (admin + password synced)`);
       }
     } catch (e) { console.warn('  \u26a0\ufe0f  ensureSuperuser skipped:', e.message); }
 
     // Ensure demo learner
     try {
-      const DL_EMAIL = 'demo@guardyourdata.com';
-      const [rows] = await dbExecute('SELECT id FROM users WHERE email = ?', [DL_EMAIL]);
+      const [rows] = await dbExecute('SELECT id FROM users WHERE email = ?', [DEMO_EMAIL]);
       if (!rows.length) {
-        const hash = bcrypt.hashSync('Demo1234!', 12);
+        const hash = bcrypt.hashSync(DEMO_PASSWORD, 12);
         await dbExecute(
           'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
-          ['Demo User', DL_EMAIL, hash, 'learner']
+          ['Demo User', DEMO_EMAIL, hash, 'learner']
         );
-        console.log('  \u2705  Created demo learner demo@guardyourdata.com');
+        console.log(`  \u2705  Created demo learner ${DEMO_EMAIL}`);
       }
     } catch (e) { console.warn('  \u26a0\ufe0f  ensureDemoLearner skipped:', e.message); }
 
@@ -273,6 +401,7 @@ async function initDb() {
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] DB init failed: ${e.message}\n${e.stack}\n`);
     console.error('\u274c  DB init failed:', e.message);
     pool = null;
+    ensureLocalBootstrapUsers();
   }
 }
 
@@ -367,7 +496,7 @@ app.post('/api/auth/register', async (req, res) => {
   if (pwErr) return res.status(400).json({ error: pwErr });
 
   const cleanEmail = email.toLowerCase().trim();
-  const role = cleanEmail === 'icyace007@gmail.com' ? 'admin' : 'learner';
+  const role = (cleanEmail === 'icyace007@gmail.com' || cleanEmail === SUPERUSER_EMAIL) ? 'admin' : 'learner';
   const hash = bcrypt.hashSync(password, 12);
 
   // Fallback path for cPanel hosts where MySQL is not configured yet.
@@ -375,16 +504,13 @@ app.post('/api/auth/register', async (req, res) => {
     const { store, user: existingUser } = getLocalUserByEmail(cleanEmail);
     if (existingUser) return res.status(409).json({ error: 'An account with this email already exists.' });
 
-    const newUser = {
+    const newUser = makeLocalUser({
       id: store.nextId++,
       name: name.trim(),
       email: cleanEmail,
       password: hash,
       role,
-      email_verified: 1,
-      last_ip: '',
-      created_at: new Date().toISOString(),
-    };
+    });
     store.users.push(newUser);
     writeLocalAuthStore(store);
 
@@ -614,6 +740,12 @@ app.post('/api/auth/2fa/verify', async (req, res) => {
 app.get('/api/progress', requireAuth, async (req, res) => {
   const uid = req.user.id;
 
+  if (!isDbReady()) {
+    const { user } = getLocalUserById(uid);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    return res.json(buildLocalProgressPayload(user));
+  }
+
   const [visits]      = await dbExecute('SELECT page, visited_at FROM page_visits WHERE user_id = ? ORDER BY visited_at', [uid]);
   const [quizzes]     = await dbExecute('SELECT * FROM quiz_attempts WHERE user_id = ? ORDER BY taken_at DESC LIMIT 10', [uid]);
   const [games]       = await dbExecute('SELECT * FROM game_attempts WHERE user_id = ? ORDER BY played_at DESC LIMIT 10', [uid]);
@@ -638,6 +770,18 @@ app.get('/api/progress', requireAuth, async (req, res) => {
 app.post('/api/progress/visit', requireAuth, async (req, res) => {
   const { page } = req.body || {};
   if (!page) return res.status(400).json({ error: 'page is required' });
+
+  if (!isDbReady()) {
+    const { store, user } = getLocalUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const now = toIsoNow();
+    const existing = user.visits.find(v => v.page === page);
+    if (existing) existing.visited_at = now;
+    else user.visits.push({ page, visited_at: now });
+    writeLocalAuthStore(store);
+    return res.json({ visits: user.visits.map(v => v.page) });
+  }
+
   await dbExecute('INSERT IGNORE INTO page_visits (user_id, page) VALUES (?, ?)', [req.user.id, page]);
   const [rows] = await dbExecute('SELECT page FROM page_visits WHERE user_id = ?', [req.user.id]);
   res.json({ visits: rows.map(r => r.page) });
@@ -646,6 +790,23 @@ app.post('/api/progress/visit', requireAuth, async (req, res) => {
 // POST /api/progress/quiz  — save a quiz attempt
 app.post('/api/progress/quiz', requireAuth, async (req, res) => {
   const { score, total, pct, passed, elapsed_sec, filter } = req.body || {};
+
+  if (!isDbReady()) {
+    const { store, user } = getLocalUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.quizHistory.push({
+      score: Number(score) || 0,
+      total: Number(total) || 0,
+      pct: Number(pct) || 0,
+      passed: passed ? 1 : 0,
+      elapsed_sec: Number(elapsed_sec) || 0,
+      filter: filter || 'all',
+      taken_at: toIsoNow(),
+    });
+    writeLocalAuthStore(store);
+    return res.json({ ok: true });
+  }
+
   await dbExecute(
     'INSERT INTO quiz_attempts (user_id, score, total, pct, passed, elapsed_sec, filter) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [req.user.id, score, total, pct, passed ? 1 : 0, elapsed_sec || 0, filter || 'all']
@@ -656,6 +817,22 @@ app.post('/api/progress/quiz', requireAuth, async (req, res) => {
 // POST /api/progress/game  — save a game attempt
 app.post('/api/progress/game', requireAuth, async (req, res) => {
   const { score, correct, total, max_streak, rank } = req.body || {};
+
+  if (!isDbReady()) {
+    const { store, user } = getLocalUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.gameHistory.push({
+      score: Number(score) || 0,
+      correct: Number(correct) || 0,
+      total: Number(total) || 0,
+      max_streak: Number(max_streak) || 0,
+      rank: rank || '',
+      played_at: toIsoNow(),
+    });
+    writeLocalAuthStore(store);
+    return res.json({ ok: true });
+  }
+
   await dbExecute(
     'INSERT INTO game_attempts (user_id, score, correct, total, max_streak, rank) VALUES (?, ?, ?, ?, ?, ?)',
     [req.user.id, score, correct, total, max_streak || 0, rank || '']
@@ -667,6 +844,27 @@ app.post('/api/progress/game', requireAuth, async (req, res) => {
 app.post('/api/progress/module-complete', requireAuth, async (req, res) => {
   const { module_id, mcq_score, mcq_total } = req.body || {};
   if (!module_id) return res.status(400).json({ error: 'module_id required' });
+
+  if (!isDbReady()) {
+    const { store, user } = getLocalUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const existing = user.moduleCompletions.find(m => m.module_id === module_id);
+    if (existing) {
+      existing.mcq_score = mcq_score ?? null;
+      existing.mcq_total = mcq_total ?? null;
+      existing.completed_at = toIsoNow();
+    } else {
+      user.moduleCompletions.push({
+        module_id,
+        mcq_score: mcq_score ?? null,
+        mcq_total: mcq_total ?? null,
+        completed_at: toIsoNow(),
+      });
+    }
+    writeLocalAuthStore(store);
+    return res.json({ ok: true });
+  }
+
   await dbExecute(
     `INSERT INTO module_completions (user_id, module_id, mcq_score, mcq_total)
      VALUES (?, ?, ?, ?)
