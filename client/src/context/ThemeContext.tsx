@@ -6,12 +6,19 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType>({ isDark: false, toggle: () => {} })
+const THEME_KEY = 'theme'
+const THEME_PREF_KEY = 'theme_preference_set'
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [isDark, setIsDark] = useState<boolean>(() => {
-    const stored = localStorage.getItem('theme')
+    const prefSet = localStorage.getItem(THEME_PREF_KEY) === '1'
+    // Force white as first-load default unless user explicitly chose a theme.
+    if (!prefSet) {
+      localStorage.setItem(THEME_KEY, 'light')
+      return false
+    }
+    const stored = localStorage.getItem(THEME_KEY)
     if (stored) return stored === 'dark'
-    // Default: light (minimalist white)
     return false
   })
 
@@ -22,11 +29,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } else {
       root.classList.remove('dark')
     }
-    localStorage.setItem('theme', isDark ? 'dark' : 'light')
+    localStorage.setItem(THEME_KEY, isDark ? 'dark' : 'light')
   }, [isDark])
 
   return (
-    <ThemeContext.Provider value={{ isDark, toggle: () => setIsDark((d) => !d) }}>
+    <ThemeContext.Provider value={{
+      isDark,
+      toggle: () => {
+        localStorage.setItem(THEME_PREF_KEY, '1')
+        setIsDark((d) => !d)
+      }
+    }}>
       {children}
     </ThemeContext.Provider>
   )
